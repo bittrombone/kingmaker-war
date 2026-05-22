@@ -37,7 +37,8 @@ let resultTimeout = null;
 let activeTab = 'battle';
 let routQueue = [];
 let selectedArmyId = null;
-let linkingMode = null; // armyId waiting to be linked to a token
+let linkingMode = null;
+let targetingMode_ctx = null; // mirror for context menu
 
 // ─── Presets ─────────────────────────────────────────────────────
 const PRESETS = {
@@ -122,22 +123,56 @@ OBR.onReady(async () => {
         every: [{ key: "layer", value: "CHARACTER", operator: "==" }],
       },
     }],
-    onClick(context) {
+    async onClick(context) {
       const item = context.items[0];
       if (!item) return;
-      const meta = item.metadata[`${ID}/army`];
-      if (!meta) return;
-      const clickedId = meta.id;
 
-      if (targetingMode) {
-        if (clickedId === targetingMode.armyId) {
-          showResult('Cannot target self', null);
-          clearTargeting();
-          return;
+      // Read fresh state from room metadata every click
+      try {
+        const freshMeta = await OBR.room.getMetadata();
+        const d = freshMeta[`${ID}/data`];
+        if (d) {
+          armies = d.armies || [];
+          round = d.round || 1;
+          currentTurnIdx = d.currentTurnIdx || 0;
+          routQueue = d.routQueue || [];
+          linkingMode = d.linkingMode || null;
+          targetingMode = d.targetingMode || null;
         }
-        resolveRoll(targetingMode.armyId, clickedId, targetingMode.rollType).then(() => clearTargeting());
-      } else {
-        selectedArmyId = clickedId;
+      } catch(e) { console.warn('metadata read error', e); }
+
+      // Linking mode
+      if (linkingMode) {
+        const army = armies.find(a => a.id === linkingMode);
+        if (army) {
+          for (const a of armies) { if (a.tokenId === item.id && a.id !== army.id) a.tokenId = null; }
+          army.tokenId = item.id;
+          await OBR.scene.items.updateItems([item.id], (items) => {
+            for (const i of items) {
+              i.metadata[`${ID}/army`] = { id: army.id, hp: army.hp, maxHp: army.maxHp, friendly: army.friendly };
+            }
+          });
+          OBR.notification.show(`Token linked to ${army.name}`, 'INFO');
+          linkingMode = null;
+          await saveData(); render();
+        }
+        return;
+      }
+
+      const meta = item.metadata[`${ID}/army`];
+
+      // Targeting mode
+      if (targetingMode) {
+        const clickedId = meta?.id;
+        if (!clickedId) { OBR.notification.show('Token not linked to an army', 'WARNING'); return; }
+        if (clickedId === targetingMode.armyId) { showResult('Cannot target self', null); clearTargeting(); return; }
+        await resolveRoll(targetingMode.armyId, clickedId, targetingMode.rollType);
+        return;
+      }
+
+      // Selection mode
+      if (meta?.id) {
+        selectedArmyId = meta.id;
         showTab('armies');
         render();
       }
@@ -161,7 +196,7 @@ async function loadData() {
 
 async function saveData() {
   try {
-    await OBR.room.setMetadata({ [`${ID}/data`]: { armies, round, currentTurnIdx, routQueue } });
+    await OBR.room.setMetadata({ [`${ID}/data`]: { armies, round, currentTurnIdx, routQueue, linkingMode, targetingMode } });
     // Sync HP labels on tokens
     const items = await OBR.scene.items.getItems();
     const toUpdate = [];
@@ -504,9 +539,10 @@ function attachHandlers() {
     await saveData(); render();
   };
 
-  window.startRoll = (armyId, rollType) => {
+  window.startRoll = async (armyId, rollType) => {
     if (targetingMode?.armyId===armyId && targetingMode?.rollType===rollType) { clearTargeting(); return; }
     targetingMode = { armyId, rollType };
+    await saveData();
     render();
     OBR.notification.show('Right-click a target token on the board', 'INFO');
   };
@@ -597,11 +633,12 @@ function attachHandlers() {
     await saveData(); render();
   };
 
-  window.startLinking = (armyId) => {
-    if (linkingMode === armyId) { linkingMode = null; render(); return; }
-    linkingMode = armyId;
+  window.startLinking = async (armyId) => {
+    if (linkingMode === armyId) { linkingMode = null; } 
+    else { linkingMode = armyId; }
+    await saveData();
     render();
-    OBR.notification.show('Right-click a token on the board to link it to this army', 'INFO');
+    if (linkingMode) OBR.notification.show('Right-click a token on the board → Target/Select Army to link', 'INFO');
   };
 
   window.unlinkToken = async (armyId) => {
@@ -705,7 +742,7 @@ function showResult(title, degree, detail, outcome) {
   resultTimeout = setTimeout(()=>div.remove(), 5000);
 }
 
-function clearTargeting() { targetingMode=null; render(); }
+async function clearTargeting() { targetingMode=null; linkingMode=null; await saveData(); render(); }
 
 })();
 </script>
