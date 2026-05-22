@@ -558,12 +558,14 @@ function attachHandlers() {
       });
 
       const token = buildImage(
-        { url: imageUrl, width: 150, height: 150, mime: "image/png" },
-        { dpi: 150, offset: { x: 75, y: 75 } }
+        { url: imageUrl, width: 300, height: 300, mime: "image/png" },
+        { dpi: 300, offset: { x: 150, y: 150 } }
       )
         .name(name)
         .position({ x: center.x, y: center.y })
         .layer("CHARACTER")
+        .locked(false)
+        .visible(true)
         .metadata({ [`${ID}/army`]: { id: armyId, hp: army.hp, maxHp: army.maxHp, friendly: army.friendly } })
         .build();
 
