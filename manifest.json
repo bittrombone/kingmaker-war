@@ -9,7 +9,7 @@
   "action": {
     "title": "Kingmaker War",
     "icon": "/icon.svg",
-    "popover": "/index.html",
+    "popover": "/",
     "height": 600,
     "width": 400
   },
