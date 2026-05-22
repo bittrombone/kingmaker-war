@@ -557,9 +557,11 @@ function attachHandlers() {
         y: window.innerHeight/2
       });
 
+      // Get scene grid DPI to size token correctly to 1 grid square
+      const grid = await OBR.scene.grid.getDpi();
       const token = buildImage(
-        { url: imageUrl, width: 300, height: 300, mime: "image/png" },
-        { dpi: 300, offset: { x: 150, y: 150 } }
+        { url: imageUrl, width: grid, height: grid, mime: "image/png" },
+        { dpi: grid, offset: { x: grid/2, y: grid/2 } }
       )
         .name(name)
         .position({ x: center.x, y: center.y })
