@@ -34,6 +34,7 @@ let targetingMode = null; // { armyId, rollType }
 let resultTimeout = null;
 let activeTab = 'battle';
 let routQueue = [];
+let selectedArmyId = null;
 
 // ─── Army presets ───────────────────────────────────────────────
 const PRESETS = {
@@ -103,19 +104,26 @@ OBR.onReady(async () => {
     }
   });
 
-  // Token click handler for targeting
+  // Token click handler for targeting and selection
   OBR.scene.items.onClick(async (item) => {
-    if (!targetingMode) return;
     const armyMeta = item.metadata[`${ID}/army`];
     if (!armyMeta) return;
-    const targetId = armyMeta.id;
-    if (targetId === targetingMode.armyId) {
-      showResult('Cannot target self', null);
+    const clickedArmyId = armyMeta.id;
+
+    if (targetingMode) {
+      if (clickedArmyId === targetingMode.armyId) {
+        showResult('Cannot target self', null);
+        clearTargeting();
+        return;
+      }
+      await resolveRoll(targetingMode.armyId, clickedArmyId, targetingMode.rollType);
       clearTargeting();
-      return;
+    } else {
+      // Clicking a token selects that army and shows its card
+      selectedArmyId = clickedArmyId;
+      showTab('armies');
+      render();
     }
-    await resolveRoll(targetingMode.armyId, targetId, targetingMode.rollType);
-    clearTargeting();
   });
 });
 
@@ -167,6 +175,13 @@ function render() {
   else if (activeTab === 'armies') content.innerHTML = renderArmies();
   else content.innerHTML = renderAdd();
   attachEventListeners();
+  // Scroll to selected army
+  if (selectedArmyId && activeTab === 'armies') {
+    setTimeout(() => {
+      const el = document.getElementById(`army-card-${selectedArmyId}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  }
 }
 
 // ─── BATTLE TAB ──────────────────────────────────────────────────
@@ -256,7 +271,10 @@ function renderArmies() {
   for (const a of armies) {
     const canEdit = isGM || a.friendly;
     if (!isGM && !a.friendly) continue;
+    const isSelected = a.id === selectedArmyId;
+    html += `<div id="army-card-${a.id}" style="${isSelected ? 'outline: 2px solid #EF9F27; border-radius: 8px;' : ''}">`;
     html += renderArmyCard(a, canEdit);
+    html += '</div>';
   }
   return html;
 }
@@ -555,8 +573,9 @@ function attachEventListeners() {
     const side    = document.getElementById('add-side')?.value;
     const preset  = document.getElementById('add-preset')?.value;
     const p       = PRESETS[preset] || {};
+    const armyId  = crypto.randomUUID();
     const army = {
-      id:       crypto.randomUUID(),
+      id:       armyId,
       name,
       type:     p.type || 'Custom',
       level:    1,
@@ -574,7 +593,49 @@ function attachEventListeners() {
       shots:    parseInt(document.getElementById('add-shots')?.value)||p.shots||0,
       hp:       parseInt(document.getElementById('add-maxhp')?.value)||p.maxHp||4,
       conditions: {},
+      tokenId: null,
     };
+
+    // Place token on board
+    try {
+      const typeKey = (preset || 'infantry').toLowerCase();
+      const sideSuffix = side === 'friendly' ? 'allied' : 'enemy';
+      const imageUrl = `https://bittrombone.github.io/kingmaker-war/token_${typeKey}_${sideSuffix}.png`;
+      
+      // Get scene bounds to place in center
+      const sceneItems = await OBR.scene.items.getItems();
+      const view = await OBR.viewport.getScale();
+      const center = await OBR.viewport.transformPoint({ x: 0, y: 0 });
+
+      const tokenItem = await OBR.scene.items.addItems([{
+        type: "IMAGE",
+        id: crypto.randomUUID(),
+        name: name,
+        visible: true,
+        locked: false,
+        layer: "CHARACTER",
+        position: { x: 0, y: 0 },
+        rotation: 0,
+        scale: { x: 1, y: 1 },
+        image: {
+          url: imageUrl,
+          width: 150,
+          height: 150,
+          mime: "image/png",
+        },
+        grid: { dpi: 150, offset: { x: 75, y: 75 } },
+        metadata: {
+          [`${ID}/army`]: { id: armyId, hp: army.hp, maxHp: army.maxHp, friendly: army.friendly }
+        }
+      }]);
+
+      if (tokenItem && tokenItem[0]) {
+        army.tokenId = tokenItem[0].id;
+      }
+    } catch(e) {
+      console.warn('Could not place token:', e);
+    }
+
     armies.push(army);
     await saveData();
     showTab('battle');
