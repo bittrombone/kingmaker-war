@@ -1,40 +1,19 @@
 {
-  "manifest_version": 1,
   "name": "Kingmaker War",
   "id": "com.kingmaker.war",
   "version": "1.0.0",
+  "manifest_version": 1,
   "description": "Army combat tracker for PF2e Kingmaker war encounters",
-  "icon": "https://raw.githubusercontent.com/bittrombone/kingmaker-war3/main/icon.svg",
+  "author": "bittrombone",
+  "icon": "/icon.svg",
   "action": {
     "title": "Kingmaker War",
-    "icon": "https://raw.githubusercontent.com/bittrombone/kingmaker-war3/main/icon.svg",
-    "popover": {
-      "url": "index.html",
-      "height": 600,
-      "width": 400
-    }
+    "icon": "/icon.svg",
+    "popover": "/index.html",
+    "height": 600,
+    "width": 400
   },
-  "contextMenu": [
-    {
-      "id": "com.kingmaker.war/toggle-friendly",
-      "icons": [
-        {
-          "icon": "https://raw.githubusercontent.com/bittrombone/kingmaker-war3/main/icon.svg",
-          "filter": {
-            "roles": ["GM"],
-            "every": [
-              { "key": "layer", "value": "CHARACTER", "operator": "==" }
-            ]
-          }
-        }
-      ],
-      "label": "Toggle Friendly",
-      "embed": {
-        "url": "context.html"
-      }
-    }
-  ],
   "background": {
-    "url": "background.html"
+    "url": "/background.html"
   }
 }
