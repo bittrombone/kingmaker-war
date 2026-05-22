@@ -409,12 +409,19 @@ function renderArmyCard(army, canEdit) {
         </div>
       </div>
       ${canEdit ? `<div class="conds-section"><div class="conds-label">CONDITIONS</div><div class="conds-grid">${condBtns}</div></div>` : ''}
-      ${canEdit && isGM ? `<div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <label style="font-size:10px;color:#666">Initiative</label>
-        <input type="number" value="${army.initiative||0}" style="width:60px;padding:3px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px" onchange="setInitiative('${army.id}',this.value)"/>
-        <button class="rout-btn holds" onclick="rollInitiative('${army.id}')">Roll</button>
-        <button class="rout-btn ${linkingMode===army.id?'routes':'holds'}" onclick="startLinking('${army.id}')">${linkingMode===army.id?'🎯 Click token...':'Link Token'}</button>
-        ${army.tokenId ? `<button class="rout-btn" style="background:#2a2a28;color:#888" onclick="unlinkToken('${army.id}')">Unlink</button>` : ''}
+      ${canEdit && isGM ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="font-size:10px;color:#666">Initiative</label>
+          <input type="number" value="${army.initiative||0}" style="width:60px;padding:3px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px" onchange="setInitiative('${army.id}',this.value)"/>
+          <button class="rout-btn holds" onclick="rollInitiative('${army.id}')">Roll</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="font-size:10px;color:#666">Token</label>
+          <select style="flex:1;padding:4px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px" onchange="linkTokenById('${army.id}',this.value)" id="token-select-${army.id}">
+            <option value="">— select token —</option>
+          </select>
+          <span style="font-size:10px;color:${army.tokenId?'#5DCAA5':'#E24B4A'}">${army.tokenId?'🔗 linked':'⚠ unlinked'}</span>
+        </div>
       </div>` : ''}
     </div>
   </div>`;
@@ -633,18 +640,11 @@ function attachHandlers() {
     await saveData(); render();
   };
 
-  window.startLinking = async (armyId) => {
-    if (linkingMode === armyId) { linkingMode = null; } 
-    else { linkingMode = armyId; }
-    await saveData();
-    render();
-    if (linkingMode) OBR.notification.show('Right-click a token on the board → Target/Select Army to link', 'INFO');
-  };
+  // startLinking removed — using dropdown instead
 
   window.unlinkToken = async (armyId) => {
     const a = armies.find(x=>x.id===armyId);
     if (!a) return;
-    // Clear army metadata from the token
     if (a.tokenId) {
       try {
         await OBR.scene.items.updateItems([a.tokenId], (items) => {
@@ -655,6 +655,44 @@ function attachHandlers() {
     a.tokenId = null;
     await saveData(); render();
   };
+
+  window.linkTokenById = async (armyId, tokenId) => {
+    if (!tokenId) return;
+    const army = armies.find(a => a.id === armyId);
+    if (!army) return;
+    // Unlink from any other army
+    for (const a of armies) { if (a.tokenId === tokenId && a.id !== armyId) a.tokenId = null; }
+    army.tokenId = tokenId;
+    try {
+      await OBR.scene.items.updateItems([tokenId], (items) => {
+        for (const i of items) {
+          i.metadata[`${ID}/army`] = { id: army.id, hp: army.hp, maxHp: army.maxHp, friendly: army.friendly };
+        }
+      });
+    } catch(e) { console.warn('token update failed', e); }
+    OBR.notification.show(`Token linked to ${army.name}`, 'INFO');
+    await saveData(); render();
+  };
+
+  // Populate token dropdowns after render
+  setTimeout(async () => {
+    try {
+      const allItems = await OBR.scene.items.getItems();
+      const tokens = allItems.filter(i => i.layer === 'CHARACTER');
+      for (const army of armies) {
+        const sel = document.getElementById(`token-select-${army.id}`);
+        if (!sel) continue;
+        sel.innerHTML = '<option value="">— select token —</option>';
+        for (const t of tokens) {
+          const opt = document.createElement('option');
+          opt.value = t.id;
+          opt.textContent = t.name || 'Unnamed token';
+          if (t.id === army.tokenId) opt.selected = true;
+          sel.appendChild(opt);
+        }
+      }
+    } catch(e) {}
+  }, 100);
 }
 
 // ─── Roll resolution ──────────────────────────────────────────────
