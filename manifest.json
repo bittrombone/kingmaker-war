@@ -1,19 +1,12 @@
 {
   "name": "Kingmaker War",
-  "id": "com.kingmaker.war",
   "version": "1.0.0",
   "manifest_version": 1,
-  "description": "Army combat tracker for PF2e Kingmaker war encounters",
-  "author": "bittrombone",
-  "icon": "/icon.svg",
   "action": {
     "title": "Kingmaker War",
     "icon": "/icon.svg",
     "popover": "/",
     "height": 600,
     "width": 400
-  },
-  "background": {
-    "url": "/background.html"
   }
 }
