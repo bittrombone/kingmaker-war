@@ -2,11 +2,14 @@
   "name": "Kingmaker War",
   "version": "1.0.0",
   "manifest_version": 1,
+  "author": "bittrombone",
+  "icon": "https://bittrombone.github.io/kingmaker-war/icon.svg",
   "action": {
     "title": "Kingmaker War",
-    "icon": "/icon.svg",
-    "popover": "/",
+    "icon": "https://bittrombone.github.io/kingmaker-war/icon.svg",
+    "popover": "https://bittrombone.github.io/kingmaker-war/index.html",
     "height": 600,
     "width": 400
-  }
+  },
+  "background_url": "https://bittrombone.github.io/kingmaker-war/background.html"
 }
