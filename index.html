@@ -20,9 +20,11 @@
   <div class="content" id="content"></div>
 </div>
 
-<script type="module">
-import OBR from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@2.2.4/+esm";
+<script>
 
+
+(async function() {
+const { default: OBR } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
 const ID = "com.kingmaker.war";
 let isGM = false;
 let armies = [];
@@ -150,7 +152,7 @@ async function saveData() {
 }
 
 // ─── Tab switching ───────────────────────────────────────────────
-window.showTab = function(tab) {
+window.showTab = function(tab) { // exposed to global
   activeTab = tab;
   document.querySelectorAll('.tab').forEach((t,i) => {
     t.classList.toggle('active', ['battle','armies','add'][i] === tab);
@@ -700,6 +702,7 @@ function clearTargeting() {
   targetingMode = null;
   render();
 }
+})();
 </script>
 </body>
 </html>
