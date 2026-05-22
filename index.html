@@ -23,7 +23,7 @@
 <script>
 (async function() {
 
-const { default: OBR, buildImage } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
+const { default: OBR } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
 
 const ID = "com.kingmaker.war";
 const BASE_URL = "https://bittrombone.github.io/kingmaker-war";
@@ -37,6 +37,7 @@ let resultTimeout = null;
 let activeTab = 'battle';
 let routQueue = [];
 let selectedArmyId = null;
+let linkingMode = null; // armyId waiting to be linked to a token
 
 // ─── Presets ─────────────────────────────────────────────────────
 const PRESETS = {
@@ -214,6 +215,10 @@ function renderBattle() {
   const activeTurn = sorted[currentTurnIdx];
   let html = '';
 
+  if (linkingMode) {
+    const la = armies.find(a => a.id === linkingMode);
+    html += `<div class="targeting-banner">🔗 Right-click a token to link it to ${la?.name||'army'}</div>`;
+  }
   if (targetingMode) {
     const atk = armies.find(a => a.id === targetingMode.armyId);
     html += `<div class="targeting-banner">🎯 Right-click target token for ${atk?.name||''} ${targetingMode.rollType}</div>`;
@@ -269,10 +274,11 @@ function renderBattle() {
     }
     // Players only see friendly army names, enemies show as "???"
     const displayName = isGM || a.friendly ? a.name : '??? (Enemy)';
+    const linkedIcon = a.tokenId ? '🔗 ' : '⚠ ';
     const displayHp   = isGM || a.friendly ? `${a.hp}/${a.maxHp} HP` : '';
     html += `<div class="init-row ${side} ${isActive?'active-turn':''} ${c.routed?'routed':''} ${a.hp<=0?'defeated':''}">
       <div class="init-header">
-        <span class="init-name">${isActive?'▶ ':''}${displayName}</span>
+        <span class="init-name">${isActive?'▶ ':''}${isGM ? linkedIcon : ''}${displayName}</span>
         <span class="init-hp ${hpClass}">${displayHp}</span>
         <span class="init-value">${a.initiative||'—'}</span>
       </div>
@@ -368,10 +374,12 @@ function renderArmyCard(army, canEdit) {
         </div>
       </div>
       ${canEdit ? `<div class="conds-section"><div class="conds-label">CONDITIONS</div><div class="conds-grid">${condBtns}</div></div>` : ''}
-      ${canEdit && isGM ? `<div style="margin-top:6px;display:flex;align-items:center;gap:8px">
+      ${canEdit && isGM ? `<div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <label style="font-size:10px;color:#666">Initiative</label>
         <input type="number" value="${army.initiative||0}" style="width:60px;padding:3px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px" onchange="setInitiative('${army.id}',this.value)"/>
         <button class="rout-btn holds" onclick="rollInitiative('${army.id}')">Roll</button>
+        <button class="rout-btn ${linkingMode===army.id?'routes':'holds'}" onclick="startLinking('${army.id}')">${linkingMode===army.id?'🎯 Click token...':'Link Token'}</button>
+        ${army.tokenId ? `<button class="rout-btn" style="background:#2a2a28;color:#888" onclick="unlinkToken('${army.id}')">Unlink</button>` : ''}
       </div>` : ''}
     </div>
   </div>`;
@@ -585,11 +593,29 @@ function attachHandlers() {
   };
 
   window.deleteArmy = async (armyId) => {
-    const a = armies.find(x=>x.id===armyId);
-    if (a?.tokenId) {
-      try { await OBR.scene.items.deleteItems([a.tokenId]); } catch(e){}
-    }
     armies = armies.filter(x=>x.id!==armyId);
+    await saveData(); render();
+  };
+
+  window.startLinking = (armyId) => {
+    if (linkingMode === armyId) { linkingMode = null; render(); return; }
+    linkingMode = armyId;
+    render();
+    OBR.notification.show('Right-click a token on the board to link it to this army', 'INFO');
+  };
+
+  window.unlinkToken = async (armyId) => {
+    const a = armies.find(x=>x.id===armyId);
+    if (!a) return;
+    // Clear army metadata from the token
+    if (a.tokenId) {
+      try {
+        await OBR.scene.items.updateItems([a.tokenId], (items) => {
+          for (const i of items) { delete i.metadata[`${ID}/army`]; }
+        });
+      } catch(e) {}
+    }
+    a.tokenId = null;
     await saveData(); render();
   };
 }
