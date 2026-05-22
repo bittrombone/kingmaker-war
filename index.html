@@ -38,6 +38,7 @@ let activeTab = 'battle';
 let routQueue = [];
 let selectedArmyId = null;
 let linkingMode = null;
+let dataLoaded = false; // prevent saves before initial load
 let targetingMode_ctx = null; // mirror for context menu
 
 // ─── Presets ─────────────────────────────────────────────────────
@@ -99,7 +100,16 @@ OBR.onReady(async () => {
   document.getElementById('scene-status').textContent = isGM ? 'GM' : 'Player';
 
   await loadData();
+  dataLoaded = true;
   render();
+
+  // Listen for target selections from context menu
+  OBR.broadcast.onMessage(`${ID}/target-selected`, async (event) => {
+    const { targetId } = event.data;
+    if (!targetingMode) return;
+    await resolveRoll(targetingMode.armyId, targetId, targetingMode.rollType);
+    await clearTargeting();
+  });
 
   // Sync when room data changes
   OBR.room.onMetadataChange((meta) => {
@@ -161,12 +171,13 @@ OBR.onReady(async () => {
 
       const meta = item.metadata[`${ID}/army`];
 
-      // Targeting mode
+      // Targeting mode — broadcast target to main panel
       if (targetingMode) {
         const clickedId = meta?.id;
         if (!clickedId) { OBR.notification.show('Token not linked to an army', 'WARNING'); return; }
-        if (clickedId === targetingMode.armyId) { showResult('Cannot target self', null); clearTargeting(); return; }
-        await resolveRoll(targetingMode.armyId, clickedId, targetingMode.rollType);
+        if (clickedId === targetingMode.armyId) { OBR.notification.show('Cannot target self', 'WARNING'); return; }
+        // Broadcast target selection to main panel
+        OBR.broadcast.sendMessage(`${ID}/target-selected`, { targetId: clickedId });
         return;
       }
 
@@ -195,6 +206,7 @@ async function loadData() {
 }
 
 async function saveData() {
+  if (!dataLoaded) return; // don't overwrite before load
   try {
     await OBR.room.setMetadata({ [`${ID}/data`]: { armies, round, currentTurnIdx, routQueue, linkingMode, targetingMode } });
     // Sync HP labels on tokens
@@ -250,13 +262,22 @@ function renderBattle() {
   const activeTurn = sorted[currentTurnIdx];
   let html = '';
 
-  if (linkingMode) {
-    const la = armies.find(a => a.id === linkingMode);
-    html += `<div class="targeting-banner">🔗 Right-click a token to link it to ${la?.name||'army'}</div>`;
-  }
   if (targetingMode) {
     const atk = armies.find(a => a.id === targetingMode.armyId);
-    html += `<div class="targeting-banner">🎯 Right-click target token for ${atk?.name||''} ${targetingMode.rollType}</div>`;
+    const targets = armies.filter(a => a.id !== targetingMode.armyId);
+    html += `<div class="rout-prompt" style="border-color:#EF9F27;background:#2a2200">
+      <h3 style="color:#EF9F27">🎯 ${atk?.name||''} — ${targetingMode.rollType}</h3>
+      <p style="font-size:11px;color:#888;margin-bottom:6px">Right-click token → ⚔ Target Army, or pick below:</p>`;
+    for (const t of targets) {
+      const show = isGM || t.friendly;
+      const label = show ? t.name : '??? (Enemy)';
+      html += `<div class="rout-army">
+        <span class="rout-army-name">${label} (${t.hp}/${t.maxHp} HP)</span>
+        <button class="rout-btn holds" onclick="executeRoll('${targetingMode.armyId}','${t.id}','${targetingMode.rollType}')">Target</button>
+      </div>`;
+    }
+    html += `<div style="margin-top:6px"><button class="btn-secondary" onclick="cancelTargeting()">Cancel</button></div>`;
+    html += `</div>`;
   }
 
   if (routQueue.length > 0 && isGM) {
@@ -551,7 +572,17 @@ function attachHandlers() {
     targetingMode = { armyId, rollType };
     await saveData();
     render();
-    OBR.notification.show('Right-click a target token on the board', 'INFO');
+    const army = armies.find(a=>a.id===armyId);
+    OBR.notification.show(`${army?.name||''}: ${rollType} — right-click target token → "⚔ Target Army"`, 'INFO');
+  };
+
+  window.executeRoll = async (attackerId, targetId, rollType) => {
+    await resolveRoll(attackerId, targetId, rollType);
+    await clearTargeting();
+  };
+
+  window.cancelTargeting = async () => {
+    await clearTargeting();
   };
 
   window.rollScout = async (armyId) => {
@@ -678,7 +709,7 @@ function attachHandlers() {
   setTimeout(async () => {
     try {
       const allItems = await OBR.scene.items.getItems();
-      const tokens = allItems.filter(i => i.layer === 'CHARACTER');
+      const tokens = allItems.filter(i => i.image); // all image items regardless of layer
       for (const army of armies) {
         const sel = document.getElementById(`token-select-${army.id}`);
         if (!sel) continue;
