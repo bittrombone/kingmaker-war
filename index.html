@@ -557,11 +557,12 @@ function attachHandlers() {
         y: window.innerHeight/2
       });
 
-      // Get scene grid DPI to size token correctly to 1 grid square
+      // Get scene grid DPI. Image has slight padding so render at 2x dpi
+      // so the visible circle fills exactly 1 grid square.
       const grid = await OBR.scene.grid.getDpi();
       const token = buildImage(
         { url: imageUrl, width: grid, height: grid, mime: "image/png" },
-        { dpi: grid, offset: { x: grid/2, y: grid/2 } }
+        { dpi: grid * 2, offset: { x: grid/2, y: grid/2 } }
       )
         .name(name)
         .position({ x: center.x, y: center.y })
