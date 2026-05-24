@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Army Stat Card</title>
+  <link rel="stylesheet" href="style.css"/>
+  <style>
+    body { padding: 0; }
+    .card-wrap { padding: 10px; }
+    .section-label { font-size: 10px; color: #666; letter-spacing: 0.05em; margin: 8px 0 4px; }
+    .stat-edit-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 4px; margin-bottom: 8px; }
+    .stat-edit { display: flex; flex-direction: column; }
+    .stat-edit label { font-size: 9px; color: #666; margin-bottom: 2px; }
+    .stat-edit input { padding: 3px 4px; background: #111; border: 1px solid #333; border-radius: 3px; color: #D3D1C7; font-size: 12px; width: 100%; }
+    .name-row { display: flex; gap: 6px; margin-bottom: 8px; }
+    .name-row input { flex: 1; padding: 5px 8px; background: #111; border: 1px solid #333; border-radius: 4px; color: #D3D1C7; font-size: 14px; font-weight: 500; }
+    .side-toggle { display: flex; border-radius: 4px; overflow: hidden; border: 1px solid #333; }
+    .side-btn { flex: 1; padding: 5px 8px; background: #1a1a18; color: #666; border: none; cursor: pointer; font-size: 11px; transition: all 0.15s; }
+    .side-btn.active-friendly { background: #0d1e30; color: #378ADD; }
+    .side-btn.active-enemy { background: #2a0d0d; color: #E24B4A; }
+    .hp-edit-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+    .save-btn { width: 100%; padding: 8px; background: #EF9F27; color: #111; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 13px; margin-top: 4px; }
+    .save-btn:hover { background: #d4891f; }
+    .divider { border: none; border-top: 0.5px solid #333; margin: 8px 0; }
+  </style>
+</head>
+<body>
+<div class="card-wrap" id="card">
+  <div style="font-size:11px;color:#666;text-align:center;padding:20px">Loading...</div>
+</div>
+<script>
+(async function() {
+const { default: OBR } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
+const ID = "com.kingmaker.war";
+
+const params = new URLSearchParams(window.location.search);
+const armyId = params.get('armyId');
+const itemId  = params.get('itemId');
+
+let army = null;
+let armies = [];
+
+const CONDITIONS = [
+  { key:'shaken',     label:'Shaken',     hasValue:true,  max:4 },
+  { key:'weary',      label:'Weary',      hasValue:true,  max:4 },
+  { key:'mired',      label:'Mired',      hasValue:true,  max:4 },
+  { key:'outflanked', label:'Outflanked', hasValue:false },
+  { key:'fortified',  label:'Fortified',  hasValue:false },
+  { key:'routed',     label:'Routed',     hasValue:false },
+  { key:'pinned',     label:'Pinned',     hasValue:false },
+  { key:'distant',    label:'Distant',    hasValue:false },
+  { key:'concealed',  label:'Concealed',  hasValue:false },
+  { key:'engaged',    label:'Engaged',    hasValue:false },
+];
+
+OBR.onReady(async () => {
+  await loadArmy();
+  render();
+
+  OBR.room.onMetadataChange((meta) => {
+    const d = meta[`${ID}/data`];
+    if (d) {
+      armies = d.armies || [];
+      army = armies.find(a => a.id === armyId);
+      render();
+    }
+  });
+});
+
+async function loadArmy() {
+  try {
+    const meta = await OBR.room.getMetadata();
+    const d = meta[`${ID}/data`];
+    if (d) {
+      armies = d.armies || [];
+      army = armies.find(a => a.id === armyId);
+    }
+  } catch(e) { console.warn('loadArmy', e); }
+}
+
+async function saveArmy() {
+  if (!army) return;
+  try {
+    const meta = await OBR.room.getMetadata();
+    const d = meta[`${ID}/data`] || {};
+    armies = d.armies || [];
+    const idx = armies.findIndex(a => a.id === armyId);
+    if (idx >= 0) armies[idx] = army;
+    else armies.push(army);
+    await OBR.room.setMetadata({ [`${ID}/data`]: { ...d, armies } });
+    // Also update token name if it changed
+    try {
+      await OBR.scene.items.updateItems([itemId], (items) => {
+        for (const i of items) {
+          i.name = army.name;
+          i.metadata[`${ID}/army`] = {
+            id: army.id, friendly: army.friendly,
+            ac: army.ac, man: army.man, mor: army.mor, sct: army.sct,
+            atk: army.atk, rng: army.rng, maxHp: army.maxHp, rt: army.rt,
+            maxShots: army.maxShots, shots: army.shots, hp: army.hp,
+            conditions: army.conditions,
+          };
+        }
+      });
+    } catch(e) {}
+  } catch(e) { console.warn('saveArmy', e); }
+}
+
+function render() {
+  const card = document.getElementById('card');
+  if (!army) { card.innerHTML=`<div style="font-size:11px;color:#666;text-align:center;padding:20px">Army not found</div>`; return; }
+  const c = army.conditions || {};
+  const hpPct = army.maxHp > 0 ? (army.hp / army.maxHp) * 100 : 0;
+  const hpColor = hpPct > 50 ? '#378ADD' : hpPct > 25 ? '#EF9F27' : '#E24B4A';
+
+  let condBtns = '';
+  for (const cond of CONDITIONS) {
+    const active = c[cond.key] ? 'active' : '';
+    const val = cond.hasValue && c[cond.key] > 0 ? `<span class="cond-value">${c[cond.key]}</span>` : '';
+    condBtns += `<button class="cond-btn ${active} ${cond.key}" onclick="toggleCond('${cond.key}')">${cond.label}${val}</button>`;
+  }
+
+  card.innerHTML = `
+    <div class="name-row">
+      <input id="army-name" type="text" value="${army.name}" placeholder="Army name" onchange="army.name=this.value"/>
+      <div class="side-toggle">
+        <button class="side-btn ${army.friendly?'active-friendly':''}" onclick="setSide(true)">Allied</button>
+        <button class="side-btn ${!army.friendly?'active-enemy':''}" onclick="setSide(false)">Enemy</button>
+      </div>
+    </div>
+
+    <div class="hp-edit-row">
+      <span style="font-size:11px;color:#666">HP</span>
+      <button class="hp-btn" onclick="changeHp(-1)">−</button>
+      <span style="font-size:15px;font-weight:600;min-width:24px;text-align:center">${army.hp}</span>
+      <button class="hp-btn" onclick="changeHp(1)">+</button>
+      <span style="font-size:11px;color:#666">/ ${army.maxHp} (RT ${army.rt})</span>
+      <div style="flex:1;background:#111;border-radius:3px;height:5px;overflow:hidden;margin-left:4px">
+        <div style="width:${hpPct}%;height:100%;background:${hpColor};border-radius:3px"></div>
+      </div>
+    </div>
+
+    <div class="section-label">STATS</div>
+    <div class="stat-edit-grid">
+      <div class="stat-edit"><label>AC</label><input type="number" value="${army.ac}" onchange="setStat('ac',this.value)"/></div>
+      <div class="stat-edit"><label>MAN</label><input type="number" value="${army.man}" onchange="setStat('man',this.value)"/></div>
+      <div class="stat-edit"><label>MOR</label><input type="number" value="${army.mor}" onchange="setStat('mor',this.value)"/></div>
+      <div class="stat-edit"><label>SCT</label><input type="number" value="${army.sct}" onchange="setStat('sct',this.value)"/></div>
+      <div class="stat-edit"><label>ATK</label><input type="number" value="${army.atk}" onchange="setStat('atk',this.value)"/></div>
+      <div class="stat-edit"><label>RNG</label><input type="number" value="${army.rng}" onchange="setStat('rng',this.value)"/></div>
+      <div class="stat-edit"><label>Max HP</label><input type="number" value="${army.maxHp}" onchange="setStat('maxHp',this.value)"/></div>
+      <div class="stat-edit"><label>RT</label><input type="number" value="${army.rt}" onchange="setStat('rt',this.value)"/></div>
+      <div class="stat-edit"><label>Shots</label><input type="number" value="${army.maxShots||0}" onchange="setStat('maxShots',this.value)"/></div>
+    </div>
+
+    <div class="divider"></div>
+    <div class="section-label">CONDITIONS</div>
+    <div class="conds-grid" style="margin-bottom:8px">${condBtns}</div>
+
+    <button class="save-btn" onclick="save()">Save</button>
+  `;
+}
+
+window.setSide = (friendly) => { army.friendly = friendly; render(); };
+window.setStat = (stat, val) => {
+  army[stat] = parseInt(val) || 0;
+  if (stat === 'maxHp') army.hp = Math.min(army.hp, army.maxHp);
+};
+window.changeHp = async (delta) => {
+  army.hp = Math.max(0, Math.min(army.maxHp, army.hp + delta));
+  await saveArmy(); render();
+};
+window.toggleCond = async (condKey) => {
+  army.conditions = army.conditions || {};
+  const cond = CONDITIONS.find(c => c.key === condKey);
+  if (cond?.hasValue) {
+    army.conditions[condKey] = ((army.conditions[condKey]||0)+1) % (cond.max+1);
+    if (!army.conditions[condKey]) delete army.conditions[condKey];
+  } else {
+    if (army.conditions[condKey]) delete army.conditions[condKey];
+    else army.conditions[condKey] = true;
+  }
+  if (condKey==='shaken'&&(army.conditions.shaken||0)>=4) army.conditions.routed=true;
+  if (condKey==='pinned'&&army.conditions.pinned) army.conditions.outflanked=true;
+  await saveArmy(); render();
+};
+window.save = async () => {
+  army.name = document.getElementById('army-name')?.value?.trim() || army.name;
+  await saveArmy();
+  OBR.notification.show(`${army.name} saved`,'INFO');
+};
+
+})();
+</script>
+</body>
+</html>

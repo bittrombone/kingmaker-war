@@ -12,11 +12,10 @@
     <h1>⚔ KINGMAKER WAR</h1>
     <span id="scene-status" style="font-size:10px;color:#666">Loading...</span>
   </div>
-  <div class="tabs" id="tabs">
+  <div class="tabs">
     <div class="tab active" onclick="showTab('battle')">Battle</div>
     <div class="tab" onclick="showTab('armies')">Armies</div>
     <div class="tab" onclick="showTab('forts')">Forts</div>
-    <div class="tab" onclick="showTab('add')">+ Add</div>
   </div>
   <div class="content" id="content"></div>
 </div>
@@ -26,7 +25,6 @@ const { default: OBR } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rod
 const ID = "com.kingmaker.war";
 const BASE_URL = "https://bittrombone.github.io/kingmaker-war";
 
-// ─── State ────────────────────────────────────────────────────────
 let isGM = false;
 let dataLoaded = false;
 let armies = [];
@@ -34,26 +32,17 @@ let fortifications = [];
 let round = 1;
 let currentTurnIdx = 0;
 let routQueue = [];
-let targetingMode = null; // { armyId, rollType } or { armyId, rollType:'siege-fort' }
+let targetingMode = null;
 let activeTab = 'battle';
-let selectedArmyId = null;
 let resultTimeout = null;
 
-// ─── Constants ────────────────────────────────────────────────────
-const PRESETS = {
-  infantry:   { type:'Infantry',   ac:16, sct:7,  man:4,  mor:10, atk:9,  rng:0,  shots:0, maxHp:4, rt:2 },
-  cavalry:    { type:'Cavalry',    ac:19, sct:9,  man:12, mor:6,  atk:12, rng:0,  shots:0, maxHp:4, rt:2 },
-  skirmisher: { type:'Skirmisher', ac:20, sct:12, man:17, mor:11, atk:15, rng:0,  shots:0, maxHp:4, rt:2 },
-  siege:      { type:'Siege',      ac:25, sct:15, man:12, mor:18, atk:0,  rng:15, shots:5, maxHp:6, rt:3 },
-};
-
 const FORT_TYPES = {
-  castle:      { label:'Castle',       ac:30, maxHp:8, maxArmies:6 },
-  keep:        { label:'Keep',         ac:25, maxHp:5, maxArmies:4 },
-  stone_wall:  { label:'Stone Wall',   ac:20, maxHp:3, maxArmies:2 },
-  tower:       { label:'Tower',        ac:20, maxHp:2, maxArmies:1 },
-  wooden_wall: { label:'Wooden Wall',  ac:15, maxHp:2, maxArmies:2 },
-  trench:      { label:'Trench',       ac:15, maxHp:1, maxArmies:1 },
+  castle:      { label:'Castle',      maxArmies:6 },
+  keep:        { label:'Keep',        maxArmies:4 },
+  stone_wall:  { label:'Stone Wall',  maxArmies:2 },
+  tower:       { label:'Tower',       maxArmies:1 },
+  wooden_wall: { label:'Wooden Wall', maxArmies:2 },
+  trench:      { label:'Trench',      maxArmies:1 },
 };
 
 const CONDITIONS = [
@@ -69,15 +58,17 @@ const CONDITIONS = [
   { key:'engaged',    label:'Engaged',    hasValue:false },
 ];
 
-// ─── Stats ────────────────────────────────────────────────────────
 function getModifiedStats(army) {
   const c = army.conditions || {};
   const shaken=c.shaken||0, weary=c.weary||0, mired=c.mired||0;
   const outflanked=c.outflanked?2:0, fortified=c.fortified?4:0;
   return {
-    ac:army.ac-weary-outflanked+fortified, man:army.man-weary-mired,
-    mor:army.mor-shaken+fortified, atk:army.atk, rng:army.rng, sct:army.sct,
-    manDC:10+army.man-weary-mired, morDC:10+army.mor-shaken,
+    ac:army.ac-weary-outflanked+fortified,
+    man:army.man-weary-mired,
+    mor:army.mor-shaken+fortified,
+    atk:army.atk, rng:army.rng, sct:army.sct,
+    manDC:10+army.man-weary-mired,
+    morDC:10+army.mor-shaken,
   };
 }
 
@@ -87,12 +78,9 @@ async function loadData() {
     const meta = await OBR.room.getMetadata();
     const d = meta[`${ID}/data`];
     if (d) {
-      armies         = d.armies         || [];
-      fortifications = d.fortifications || [];
-      round          = d.round          || 1;
-      currentTurnIdx = d.currentTurnIdx || 0;
-      routQueue      = d.routQueue      || [];
-      targetingMode  = d.targetingMode  || null;
+      armies=d.armies||[]; fortifications=d.fortifications||[];
+      round=d.round||1; currentTurnIdx=d.currentTurnIdx||0;
+      routQueue=d.routQueue||[]; targetingMode=d.targetingMode||null;
     }
   } catch(e) { console.warn('loadData',e); }
 }
@@ -100,10 +88,42 @@ async function loadData() {
 async function saveData() {
   if (!dataLoaded) return;
   try {
-    await OBR.room.setMetadata({
-      [`${ID}/data`]: { armies, fortifications, round, currentTurnIdx, routQueue, targetingMode }
-    });
+    await OBR.room.setMetadata({[`${ID}/data`]:{armies,fortifications,round,currentTurnIdx,routQueue,targetingMode}});
   } catch(e) { console.warn('saveData',e); }
+}
+
+// Sync armies from token metadata on scene
+async function syncArmiesFromTokens() {
+  try {
+    const items = await OBR.scene.items.getItems();
+    const tokenArmies = items
+      .filter(i => i.layer==='CHARACTER' && i.metadata[`${ID}/army`])
+      .map(i => {
+        const meta = i.metadata[`${ID}/army`];
+        const existing = armies.find(a=>a.id===meta.id);
+        return existing || {
+          id: meta.id,
+          name: i.name||'Army',
+          friendly: meta.friendly||false,
+          initiative: 0,
+          ac: meta.ac||16, man: meta.man||4, mor: meta.mor||10,
+          sct: meta.sct||7, atk: meta.atk||9, rng: meta.rng||0,
+          maxHp: meta.maxHp||4, rt: meta.rt||2,
+          maxShots: meta.maxShots||0, shots: meta.shots||0,
+          hp: meta.hp||meta.maxHp||4,
+          conditions: meta.conditions||{},
+          tokenId: i.id,
+        };
+      });
+    // Merge: keep existing data, add new tokens
+    const existingIds = armies.map(a=>a.id);
+    for (const ta of tokenArmies) {
+      if (!existingIds.includes(ta.id)) armies.push(ta);
+    }
+    // Remove armies whose tokens no longer exist
+    const tokenIds = items.map(i=>i.id);
+    armies = armies.filter(a => !a.tokenId || tokenIds.includes(a.tokenId));
+  } catch(e) { console.warn('syncArmies',e); }
 }
 
 // ─── OBR Init ─────────────────────────────────────────────────────
@@ -111,7 +131,9 @@ OBR.onReady(async () => {
   const role = await OBR.player.getRole();
   isGM = role==='GM';
   document.getElementById('scene-status').textContent = isGM?'GM':'Player';
+
   await loadData();
+  await syncArmiesFromTokens();
   dataLoaded = true;
   render();
 
@@ -125,13 +147,55 @@ OBR.onReady(async () => {
     }
   });
 
+  // Sync when tokens change
+  OBR.scene.items.onChange(async () => {
+    await syncArmiesFromTokens();
+    render();
+  });
+
+  // Context menu — stat card popover
   OBR.contextMenu.create({
-    id:`${ID}/select`, icons:[{icon:`${BASE_URL}/icon.svg`,label:'Select Army',filter:{}}],
+    id: `${ID}/statcard`,
+    icons: [{
+      icon: `${BASE_URL}/icon.svg`,
+      label: 'Army Stat Card',
+      filter: { every: [{ key:'layer', value:'CHARACTER', operator:'==' }] },
+    }],
     async onClick(context) {
-      const item=context.items[0]; if(!item) return;
-      try { const m=await OBR.room.getMetadata(); const d=m[`${ID}/data`]; if(d){armies=d.armies||[];fortifications=d.fortifications||[];} } catch(e) {}
-      const army=armies.find(a=>a.tokenId===item.id);
-      if (army&&(isGM||army.friendly)) { selectedArmyId=army.id; showTab('armies'); render(); }
+      const item = context.items[0]; if (!item) return;
+      // Read fresh data
+      try { const m=await OBR.room.getMetadata(); const d=m[`${ID}/data`]; if(d){armies=d.armies||[];} } catch(e) {}
+      // Find or create army for this token
+      let army = armies.find(a=>a.tokenId===item.id);
+      if (!army) {
+        const meta = item.metadata[`${ID}/army`]||{};
+        army = {
+          id: meta.id||crypto.randomUUID(),
+          name: item.name||'Army',
+          friendly: meta.friendly||false,
+          initiative: 0,
+          ac: meta.ac||16, man: meta.man||4, mor: meta.mor||10,
+          sct: meta.sct||7, atk: meta.atk||9, rng: meta.rng||0,
+          maxHp: meta.maxHp||4, rt: meta.rt||2,
+          maxShots: meta.maxShots||0, shots: meta.shots||0,
+          hp: meta.hp||meta.maxHp||4,
+          conditions: meta.conditions||{},
+          tokenId: item.id,
+        };
+        armies.push(army);
+        await saveData();
+      }
+      // Open popover
+      await OBR.popover.open({
+        id: `${ID}/popover-${item.id}`,
+        url: `${BASE_URL}/statcard.html?armyId=${army.id}&itemId=${item.id}`,
+        height: 480,
+        width: 300,
+        anchorElementId: item.id,
+        anchorReference: 'ELEMENT',
+        anchorOrigin: { vertical:'BOTTOM', horizontal:'CENTER' },
+        transformOrigin: { vertical:'TOP', horizontal:'CENTER' },
+      });
     }
   });
 });
@@ -139,19 +203,15 @@ OBR.onReady(async () => {
 // ─── Tabs ─────────────────────────────────────────────────────────
 window.showTab = function(tab) {
   activeTab=tab;
-  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',['battle','armies','forts','add'][i]===tab));
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',['battle','armies','forts'][i]===tab));
   render();
 };
 
-// ─── Render ───────────────────────────────────────────────────────
 function render() {
   const c=document.getElementById('content'); if(!c) return;
   if      (activeTab==='battle') c.innerHTML=renderBattle();
   else if (activeTab==='armies') c.innerHTML=renderArmies();
-  else if (activeTab==='forts')  c.innerHTML=renderForts();
-  else                           c.innerHTML=renderAdd();
-  populateTokenDropdowns();
-  if (selectedArmyId&&activeTab==='armies') setTimeout(()=>document.getElementById(`acard-${selectedArmyId}`)?.scrollIntoView({behavior:'smooth',block:'start'}),60);
+  else                           c.innerHTML=renderForts();
 }
 
 // ─── Battle ───────────────────────────────────────────────────────
@@ -160,31 +220,20 @@ function renderBattle() {
   const activeTurn=sorted[currentTurnIdx]||null;
   let html='';
 
+  // Targeting picker
   if (targetingMode) {
     const atk=armies.find(a=>a.id===targetingMode.armyId);
-    const isSiege = atk?.type==='Siege';
-    const targets=armies.filter(a=>a.id!==targetingMode.armyId);
     html+=`<div class="rout-prompt" style="border-color:#EF9F27;background:#2a2200">
       <h3 style="color:#EF9F27">🎯 ${atk?.name||''} — ${targetingMode.rollType}</h3>`;
-    for (const t of targets) {
+    for (const t of armies.filter(a=>a.id!==targetingMode.armyId)) {
       const label=isGM||t.friendly?t.name:'???';
       const hp=isGM||t.friendly?` (${t.hp}/${t.maxHp} HP)`:'';
       html+=`<div class="rout-army"><span class="rout-army-name">${label}${hp}</span><button class="rout-btn holds" onclick="executeRoll('${targetingMode.armyId}','${t.id}','${targetingMode.rollType}')">Target</button></div>`;
     }
-    // Siege can also target fortifications
-    if (isSiege && (targetingMode.rollType==='ranged'||targetingMode.rollType==='attack')) {
-      if (fortifications.length>0) {
-        html+=`<div style="font-size:10px;color:#888;margin:6px 0 2px;letter-spacing:1px">FORTIFICATIONS</div>`;
-        for (const f of fortifications) {
-          const hpPct=f.maxHp>0?(f.hp/f.maxHp)*100:0;
-          const dmgClass=hpPct<=50?'color:#EF9F27':'';
-          html+=`<div class="rout-army"><span class="rout-army-name" style="${dmgClass}">${f.name} (${f.hp}/${f.maxHp} HP · AC ${f.ac})</span><button class="rout-btn routes" onclick="siegeAttackFort('${targetingMode.armyId}','${f.id}')">Attack Fort</button></div>`;
-        }
-      }
-    }
     html+=`<button class="btn-secondary" style="margin-top:6px;width:100%" onclick="cancelTargeting()">Cancel</button></div>`;
   }
 
+  // Rout prompts
   if (routQueue.length>0&&isGM) {
     html+=`<div class="rout-prompt"><h3>⚠ Rout Checks</h3>`;
     for (const rid of routQueue) {
@@ -194,120 +243,115 @@ function renderBattle() {
     html+=`</div>`;
   }
 
+  // Round bar
   html+=`<div class="round-bar"><span class="round-label">Round</span><button class="btn-round" onclick="changeRound(-1)">−</button><span class="round-num">${round}</span><button class="btn-round" onclick="changeRound(1)">+</button><button class="btn-next-turn" onclick="nextTurn()">Next ▶</button><button class="btn-end-round" onclick="endRound()">End Round</button></div>`;
-  if (isGM) html+=`<button class="btn-secondary" style="margin-bottom:8px;width:100%" onclick="rollAllInitiative()">🎲 Roll All Initiative</button>`;
+  html+=`<button class="btn-secondary" style="margin-bottom:8px;width:100%" onclick="rollAllInitiative()">🎲 Roll All Initiative</button>`;
 
-  if (sorted.length===0) { html+=`<div class="empty">No armies yet. Use + Add.</div>`; return html; }
+  if (sorted.length===0) { html+=`<div class="empty">No armies yet. Place tokens on the board and right-click them to set up army stat cards.</div>`; return html; }
 
+  // Initiative list
   html+=`<div class="initiative-list">`;
   for (let i=0;i<sorted.length;i++) {
-    const a=sorted[i]; const isActive=activeTurn?.id===a.id;
+    const a=sorted[i];
+    const isActive=activeTurn?.id===a.id;
     const hpPct=a.maxHp>0?(a.hp/a.maxHp)*100:0;
     const hpClass=hpPct>50?'':hpPct>25?'bloodied':'critical';
-    const side=a.friendly?'friendly':'enemy'; const c=a.conditions||{};
-    const linked=a.tokenId?'🔗':'⚠';
+    const side=a.friendly?'friendly':'enemy';
+    const c=a.conditions||{};
     let condHtml='';
     for (const cond of CONDITIONS) {
       if (c[cond.key]) { const val=cond.hasValue&&c[cond.key]>0?` ${c[cond.key]}`:''; condHtml+=`<span class="cond-badge cond-${cond.key}">${cond.label}${val}</span>`; }
     }
     const displayName=isGM||a.friendly?a.name:'??? (Enemy)';
     const displayHp=isGM||a.friendly?`${a.hp}/${a.maxHp} HP`:'';
-    html+=`<div class="init-row ${side} ${isActive?'active-turn':''} ${c.routed?'routed':''} ${a.hp<=0?'defeated':''}"><div class="init-header"><span class="init-name">${isActive?'▶ ':''}${isGM?linked+' ':''}${displayName}</span><span class="init-hp ${hpClass}">${displayHp}</span><span class="init-value">${a.initiative||'—'}</span></div>${condHtml?`<div class="init-conditions">${condHtml}</div>`:''}</div>`;
+    html+=`<div class="init-row ${side} ${isActive?'active-turn':''} ${c.routed?'routed':''} ${a.hp<=0?'defeated':''}"><div class="init-header"><span class="init-name">${isActive?'▶ ':''}${displayName}</span><span class="init-hp ${hpClass}">${displayHp}</span><span class="init-value">${a.initiative||'—'}</span></div>${condHtml?`<div class="init-conditions">${condHtml}</div>`:''}</div>`;
   }
   html+=`</div>`;
-  if (activeTurn&&(isGM||activeTurn.friendly)) html+=renderArmyCard(activeTurn,isGM||activeTurn.friendly);
+
+  // Active army roll buttons
+  if (activeTurn&&(isGM||activeTurn.friendly)) {
+    const s=getModifiedStats(activeTurn);
+    const dis=targetingMode?'disabled':'';
+    const aw=(rt)=>targetingMode?.armyId===activeTurn.id&&targetingMode?.rollType===rt?'awaiting-target':'';
+    const hasRanged=activeTurn.maxShots>0;
+    html+=`<div class="army-card" style="margin-top:8px">
+      <div class="army-card-header ${activeTurn.friendly?'friendly':'enemy'}">
+        <span class="army-title">${activeTurn.name}</span>
+        <span style="font-size:10px;color:#666">${activeTurn.hp}/${activeTurn.maxHp} HP</span>
+      </div>
+      <div class="army-card-body">
+        <div class="rolls-section"><div class="rolls-label">ROLLS</div><div class="roll-btns">
+          ${activeTurn.atk>0?`<button class="roll-btn ${aw('attack')}" ${dis} onclick="startRoll('${activeTurn.id}','attack')">Attack (+${activeTurn.atk})</button>`:''}
+          ${hasRanged?`<button class="roll-btn ${aw('ranged')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged')">Ranged (+${activeTurn.rng}) [${activeTurn.shots||0}]</button>`:''}
+          <button class="roll-btn ${aw('maneuver')}" ${dis} onclick="startRoll('${activeTurn.id}','maneuver')">Maneuver (+${s.man})</button>
+          <button class="roll-btn ${aw('morale')}" ${dis} onclick="startRoll('${activeTurn.id}','morale')">Morale (+${s.mor})</button>
+          <button class="roll-btn" onclick="rollScout('${activeTurn.id}')">Scout (+${activeTurn.sct})</button>
+        </div></div>
+        <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
+          <label style="font-size:10px;color:#666">HP</label>
+          <button class="hp-btn" onclick="changeHp('${activeTurn.id}',-1)">−</button>
+          <span style="font-size:14px;font-weight:500;min-width:20px;text-align:center">${activeTurn.hp}</span>
+          <button class="hp-btn" onclick="changeHp('${activeTurn.id}',1)">+</button>
+          <label style="font-size:10px;color:#666;margin-left:8px">Initiative</label>
+          <input type="number" value="${activeTurn.initiative||0}" style="width:54px;padding:3px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px" onchange="setInitiative('${activeTurn.id}',this.value)"/>
+          <button class="rout-btn holds" style="padding:3px 8px" onclick="rollInitiative('${activeTurn.id}')">Roll</button>
+        </div>
+      </div>
+    </div>`;
+  }
   return html;
 }
 
 // ─── Armies ───────────────────────────────────────────────────────
 function renderArmies() {
-  if (armies.length===0) return `<div class="empty">No armies yet.</div>`;
+  if (armies.length===0) return `<div class="empty">No armies yet. Place tokens on the board and right-click them.</div>`;
   let html='';
   for (const a of armies) {
     if (!isGM&&!a.friendly) continue;
-    const sel=a.id===selectedArmyId?'outline:2px solid #EF9F27;border-radius:8px;':'';
-    html+=`<div id="acard-${a.id}" style="${sel}">${renderArmyCard(a,isGM||a.friendly)}</div>`;
+    const s=getModifiedStats(a);
+    const c=a.conditions||{};
+    const hpPct=a.maxHp>0?(a.hp/a.maxHp)*100:0;
+    const hpColor=hpPct>50?'#378ADD':hpPct>25?'#EF9F27':'#E24B4A';
+    const side=a.friendly?'friendly':'enemy';
+    let condBtns='';
+    for (const cond of CONDITIONS) {
+      const active=c[cond.key]?'active':'';
+      const val=cond.hasValue&&c[cond.key]>0?`<span class="cond-value">${c[cond.key]}</span>`:'';
+      condBtns+=`<button class="cond-btn ${active} ${cond.key}" onclick="toggleCondition('${a.id}','${cond.key}')">${cond.label}${val}</button>`;
+    }
+    html+=`<div class="army-card">
+      <div class="army-card-header ${side}">
+        <span class="army-title">${a.name}</span>
+        <span style="font-size:10px;color:#666">${a.friendly?'Friendly':'Enemy'}</span>
+        ${isGM?`<button style="font-size:10px;padding:2px 6px;background:#333;border:1px solid #555;border-radius:3px;color:#888;cursor:pointer" onclick="deleteArmy('${a.id}')">✕</button>`:''}
+      </div>
+      <div class="army-card-body">
+        <div class="stats-row">
+          <div class="stat-box"><div class="stat-label">AC</div><div class="stat-value ${s.ac!==a.ac?'modified':''}">${s.ac}</div></div>
+          <div class="stat-box"><div class="stat-label">MAN</div><div class="stat-value ${s.man!==a.man?'modified':''}" >+${s.man}</div></div>
+          <div class="stat-box"><div class="stat-label">MOR</div><div class="stat-value ${s.mor!==a.mor?'modified':''}">+${s.mor}</div></div>
+          <div class="stat-box"><div class="stat-label">SCT</div><div class="stat-value">+${a.sct}</div></div>
+        </div>
+        <div class="hp-row" style="margin-bottom:8px">
+          <span class="hp-label">HP</span>
+          <div class="hp-controls">
+            <button class="hp-btn" onclick="changeHp('${a.id}',-1)">−</button>
+            <span class="hp-display">${a.hp}</span>
+            <span class="hp-max">/ ${a.maxHp} (RT ${a.rt})</span>
+            <button class="hp-btn" onclick="changeHp('${a.id}',1)">+</button>
+          </div>
+          <div class="hp-bar-wrap"><div class="hp-bar" style="width:${hpPct}%;background:${hpColor}"></div></div>
+        </div>
+        <div class="conds-section"><div class="conds-label">CONDITIONS</div><div class="conds-grid">${condBtns}</div></div>
+      </div>
+    </div>`;
   }
   return html;
 }
 
-function renderArmyCard(army, canEdit) {
-  const s=getModifiedStats(army); const c=army.conditions||{};
-  const hpPct=army.maxHp>0?(army.hp/army.maxHp)*100:0;
-  const hpColor=hpPct>50?'#378ADD':hpPct>25?'#EF9F27':'#E24B4A';
-  const side=army.friendly?'friendly':'enemy'; const hasRanged=army.maxShots>0;
-  let shotsHtml='';
-  if (hasRanged) {
-    const used=army.maxShots-(army.shots||0);
-    shotsHtml=`<div class="shots-row"><span class="shots-label">Shots</span><div class="shot-pips">`;
-    for (let i=0;i<army.maxShots;i++) shotsHtml+=`<div class="shot-pip ${i<used?'used':''}" onclick="toggleShot('${army.id}',${i})"></div>`;
-    shotsHtml+=`</div><span style="font-size:11px;color:#666;margin-left:4px">${army.shots||0}/${army.maxShots}</span></div>`;
-  }
-  const dis=targetingMode?'disabled':'';
-  const aw=(rt)=>targetingMode?.armyId===army.id&&targetingMode?.rollType===rt?'awaiting-target':'';
-  let condBtns='';
-  for (const cond of CONDITIONS) {
-    const active=c[cond.key]?'active':''; const val=cond.hasValue&&c[cond.key]>0?`<span class="cond-value">${c[cond.key]}</span>`:'';
-    condBtns+=`<button class="cond-btn ${active} ${cond.key}" onclick="toggleCondition('${army.id}','${cond.key}')">${cond.label}${val}</button>`;
-  }
-  const modAc=s.ac!==army.ac?'modified':''; const modMan=s.man!==army.man?'modified':''; const modMor=s.mor!==army.mor?'modified':'';
-  // Garrisoned fort info
-  const garrisonedFort = fortifications.find(f=>f.garrisonedArmies?.includes(army.id));
-  const fortBadge = garrisonedFort ? `<span style="font-size:10px;padding:1px 6px;background:#0d1e30;color:#378ADD;border-radius:3px;margin-left:4px">🏰 ${garrisonedFort.name}</span>` : '';
-  return `<div class="army-card">
-    <div class="army-card-header ${side}">
-      <span class="army-title">${army.name}</span>
-      <span style="font-size:10px;color:#666">${army.type||''}</span>
-      ${fortBadge}
-      ${isGM?`<button style="font-size:10px;padding:2px 6px;background:#333;border:1px solid #555;border-radius:3px;color:#888;cursor:pointer" onclick="deleteArmy('${army.id}')">✕</button>`:''}
-    </div>
-    <div class="army-card-body">
-      <div class="stats-row">
-        <div class="stat-box"><div class="stat-label">AC</div><div class="stat-value ${modAc}">${s.ac}</div></div>
-        <div class="stat-box"><div class="stat-label">MAN</div><div class="stat-value ${modMan}">+${s.man}</div></div>
-        <div class="stat-box"><div class="stat-label">MOR</div><div class="stat-value ${modMor}">+${s.mor}</div></div>
-        <div class="stat-box"><div class="stat-label">SCT</div><div class="stat-value">+${army.sct}</div></div>
-      </div>
-      <div class="hp-section"><div class="hp-row">
-        <span class="hp-label">HP</span>
-        <div class="hp-controls">
-          <button class="hp-btn" onclick="changeHp('${army.id}',-1)">−</button>
-          <span class="hp-display">${army.hp}</span>
-          <span class="hp-max">/ ${army.maxHp} (RT ${army.rt})</span>
-          <button class="hp-btn" onclick="changeHp('${army.id}',1)">+</button>
-        </div>
-        <div class="hp-bar-wrap"><div class="hp-bar" style="width:${hpPct}%;background:${hpColor}"></div></div>
-      </div></div>
-      ${shotsHtml}
-      <div class="rolls-section"><div class="rolls-label">ROLLS</div><div class="roll-btns">
-        ${army.atk>0?`<button class="roll-btn ${aw('attack')}" ${dis} onclick="startRoll('${army.id}','attack')">Attack (+${army.atk})</button>`:''}
-        ${hasRanged?`<button class="roll-btn ${aw('ranged')}" ${dis} onclick="startRoll('${army.id}','ranged')">Ranged (+${army.rng})</button>`:''}
-        <button class="roll-btn ${aw('maneuver')}" ${dis} onclick="startRoll('${army.id}','maneuver')">Maneuver (+${army.man})</button>
-        <button class="roll-btn ${aw('morale')}" ${dis} onclick="startRoll('${army.id}','morale')">Morale (+${army.mor})</button>
-        <button class="roll-btn" onclick="rollScout('${army.id}')">Scout (+${army.sct})</button>
-      </div></div>
-      ${canEdit?`<div class="conds-section"><div class="conds-label">CONDITIONS</div><div class="conds-grid">${condBtns}</div></div>`:''}
-      ${canEdit&&isGM?`<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
-        <div style="display:flex;align-items:center;gap:8px">
-          <label style="font-size:10px;color:#666">Initiative</label>
-          <input type="number" value="${army.initiative||0}" style="width:60px;padding:3px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px" onchange="setInitiative('${army.id}',this.value)"/>
-          <button class="rout-btn holds" onclick="rollInitiative('${army.id}')">Roll</button>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <label style="font-size:10px;color:#666">Token</label>
-          <select id="token-select-${army.id}" style="flex:1;padding:4px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px" onchange="linkTokenById('${army.id}',this.value)">
-            <option value="">— select token —</option>
-          </select>
-          <span style="font-size:10px;color:${army.tokenId?'#5DCAA5':'#E24B4A'}">${army.tokenId?'🔗':'⚠'}</span>
-        </div>
-      </div>`:''}
-    </div>
-  </div>`;
-}
-
-// ─── Fortifications ───────────────────────────────────────────────
+// ─── Forts ────────────────────────────────────────────────────────
 function renderForts() {
-  let html = '';
+  let html='';
   if (isGM) {
     html+=`<div class="add-army-form" style="margin-bottom:10px">
       <div style="font-size:12px;font-weight:500;color:#888;margin-bottom:8px;letter-spacing:1px">ADD FORTIFICATION</div>
@@ -320,16 +364,8 @@ function renderForts() {
       <button class="btn-add" onclick="addFort()">Add Fortification</button>
     </div>`;
   }
-
-  if (fortifications.length===0) {
-    html+=`<div class="empty">No fortifications. ${isGM?'Add one above.':''}</div>`;
-    return html;
-  }
-
+  if (fortifications.length===0) { html+=`<div class="empty">No fortifications.</div>`; return html; }
   for (const f of fortifications) {
-    const hpPct=f.maxHp>0?(f.hp/f.maxHp)*100:0;
-    const hpColor=hpPct>50?'#378ADD':hpPct>25?'#EF9F27':'#E24B4A';
-    const damaged=f.hp<=Math.floor(f.maxHp/2);
     const garrisoned=f.garrisonedArmies||[];
     const garrisonedNames=garrisoned.map(id=>armies.find(a=>a.id===id)?.name||'Unknown').join(', ');
     const slots=f.maxArmies-garrisoned.length;
@@ -337,99 +373,25 @@ function renderForts() {
       <div class="army-card-header" style="border-top:2px solid #7F77DD;background:#1a1535">
         <span class="army-title">🏰 ${f.name}</span>
         <span style="font-size:10px;color:#9F8FEF">${FORT_TYPES[f.type]?.label||f.type}</span>
-        ${damaged?`<span style="font-size:10px;padding:1px 6px;background:#2a1500;color:#EF9F27;border-radius:3px">⚠ Damaged</span>`:''}
-        ${isGM?`<button style="font-size:10px;padding:2px 6px;background:#333;border:1px solid #555;border-radius:3px;color:#888;cursor:pointer" onclick="deleteFort('${f.id}')">✕</button>`:''}
+        <span style="font-size:10px;color:#666;margin-left:auto">${garrisoned.length}/${f.maxArmies}</span>
+        ${isGM?`<button style="font-size:10px;padding:2px 6px;background:#333;border:1px solid #555;border-radius:3px;color:#888;cursor:pointer;margin-left:6px" onclick="deleteFort('${f.id}')">✕</button>`:''}
       </div>
       <div class="army-card-body">
-        <div class="stats-row">
-          <div class="stat-box"><div class="stat-label">AC</div><div class="stat-value">${f.ac}</div></div>
-          <div class="stat-box"><div class="stat-label">Max HP</div><div class="stat-value">${f.maxHp}</div></div>
-          <div class="stat-box"><div class="stat-label">Slots</div><div class="stat-value">${garrisoned.length}/${f.maxArmies}</div></div>
-          <div class="stat-box"><div class="stat-label">Open</div><div class="stat-value">${slots}</div></div>
+        ${garrisoned.length>0?`<div style="font-size:11px;color:#888;margin-bottom:8px">Garrisoned: ${garrisonedNames}</div>`:'<div style="font-size:11px;color:#555;margin-bottom:8px">No armies garrisoned</div>'}
+        <div style="font-size:11px;color:${slots>0?'#5DCAA5':'#EF9F27'};margin-bottom:8px">${slots>0?`${slots} slot${slots!==1?'s':''} available`:'Full'}</div>
+        ${isGM?`<div style="display:flex;gap:6px;margin-bottom:6px">
+          <select id="garrison-select-${f.id}" style="flex:1;padding:4px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px">
+            <option value="">— garrison army —</option>
+            ${armies.filter(a=>!garrisoned.includes(a.id)).map(a=>`<option value="${a.id}">${a.name}</option>`).join('')}
+          </select>
+          <button class="rout-btn holds" onclick="garrisonArmy('${f.id}')">Add</button>
         </div>
-        <div class="hp-section"><div class="hp-row">
-          <span class="hp-label">HP</span>
-          <div class="hp-controls">
-            ${isGM?`<button class="hp-btn" onclick="changeFortHp('${f.id}',-1)">−</button>`:''}
-            <span class="hp-display">${f.hp}</span>
-            <span class="hp-max">/ ${f.maxHp}</span>
-            ${isGM?`<button class="hp-btn" onclick="changeFortHp('${f.id}',1)">+</button>`:''}
-          </div>
-          <div class="hp-bar-wrap"><div class="hp-bar" style="width:${hpPct}%;background:${hpColor}"></div></div>
-        </div></div>
-        ${garrisoned.length>0?`<div style="font-size:11px;color:#888;margin-bottom:6px">Garrisoned: ${garrisonedNames}</div>`:''}
-        ${isGM?`<div style="margin-top:6px">
-          <div style="font-size:10px;color:#666;margin-bottom:4px;letter-spacing:1px">GARRISON ARMY</div>
-          <div style="display:flex;gap:6px">
-            <select id="garrison-select-${f.id}" style="flex:1;padding:4px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px">
-              <option value="">— select army —</option>
-              ${armies.filter(a=>!garrisoned.includes(a.id)).map(a=>`<option value="${a.id}">${a.name}</option>`).join('')}
-            </select>
-            <button class="rout-btn holds" onclick="garrisonArmy('${f.id}')">Garrison</button>
-          </div>
-          ${garrisoned.length>0?`<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">
-            ${garrisoned.map(id=>{const a=armies.find(x=>x.id===id); return a?`<button class="cond-btn active outflanked" onclick="removeFromGarrison('${f.id}','${id}')">${a.name} ✕</button>`:''}).join('')}
-          </div>`:''}
-        </div>`:''}
+        ${garrisoned.length>0?`<div style="display:flex;flex-wrap:wrap;gap:4px">${garrisoned.map(id=>{const a=armies.find(x=>x.id===id);return a?`<button class="cond-btn active outflanked" onclick="removeFromGarrison('${f.id}','${id}')">${a.name} ✕</button>`:''}).join('')}</div>`:''}
+        `:''}
       </div>
     </div>`;
   }
   return html;
-}
-
-// ─── Add ──────────────────────────────────────────────────────────
-function renderAdd() {
-  return `<div class="add-army-form">
-    <div class="form-row"><label class="form-label">Army Name</label><input class="form-input" id="add-name" type="text" placeholder="e.g. King's Infantry"/></div>
-    <div class="form-row"><label class="form-label">Preset</label>
-      <select class="select-input" id="add-preset" onchange="applyPreset()">
-        <option value="">Custom</option><option value="infantry">Infantry (Lvl 1)</option>
-        <option value="cavalry">Cavalry (Lvl 3)</option><option value="skirmisher">Skirmisher (Lvl 5)</option>
-        <option value="siege">Siege (Lvl 7)</option>
-      </select></div>
-    <div class="form-row"><label class="form-label">Side</label>
-      <select class="select-input" id="add-side"><option value="friendly">Friendly</option><option value="enemy">Enemy</option></select></div>
-    <div class="form-row"><label class="form-label">Stats</label>
-      <div class="form-grid">
-        <div><label class="form-label">AC</label><input class="form-input" id="add-ac" type="number" value="16"/></div>
-        <div><label class="form-label">MAN</label><input class="form-input" id="add-man" type="number" value="4"/></div>
-        <div><label class="form-label">MOR</label><input class="form-input" id="add-mor" type="number" value="10"/></div>
-        <div><label class="form-label">SCT</label><input class="form-input" id="add-sct" type="number" value="7"/></div>
-        <div><label class="form-label">ATK</label><input class="form-input" id="add-atk" type="number" value="9"/></div>
-        <div><label class="form-label">RNG</label><input class="form-input" id="add-rng" type="number" value="0"/></div>
-        <div><label class="form-label">Max HP</label><input class="form-input" id="add-maxhp" type="number" value="4"/></div>
-        <div><label class="form-label">RT</label><input class="form-input" id="add-rt" type="number" value="2"/></div>
-        <div><label class="form-label">Shots</label><input class="form-input" id="add-shots" type="number" value="0"/></div>
-      </div></div>
-    <button class="btn-add" onclick="addArmy()">Add Army</button>
-  </div>`;
-}
-
-// ─── Token dropdown ───────────────────────────────────────────────
-async function populateTokenDropdowns() {
-  try {
-    const allItems = await OBR.scene.items.getItems();
-    // Only show tokens on CHARACTER layer with a name — excludes map tiles, backgrounds etc
-    const linkedFortTokenIds = fortifications.map(f=>f.tokenId).filter(Boolean);
-    const tokens = allItems.filter(i =>
-      i.image &&
-      i.layer === 'CHARACTER' &&
-      !linkedFortTokenIds.includes(i.id)
-    );
-    for (const army of armies) {
-      const sel=document.getElementById(`token-select-${army.id}`); if(!sel) continue;
-      sel.innerHTML='<option value="">— select token —</option>';
-      for (const t of tokens) {
-        // Skip tokens already linked to a different army
-        const linkedArmy = armies.find(a=>a.tokenId===t.id&&a.id!==army.id);
-        if (linkedArmy) continue;
-        const opt=document.createElement('option');
-        opt.value=t.id; opt.textContent=t.name||'Unnamed token';
-        if (t.id===army.tokenId) opt.selected=true;
-        sel.appendChild(opt);
-      }
-    }
-  } catch(e) {}
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────
@@ -449,19 +411,20 @@ window.resolveRout = async (armyId,result) => {
   if (result==='routes') { const a=armies.find(x=>x.id===armyId); if(a){a.conditions=a.conditions||{};a.conditions.routed=true;a.conditions.shaken=Math.min(4,(a.conditions.shaken||0)+1);} }
   await saveData(); render();
 };
-window.rollAllInitiative = async () => { for(const a of armies) a.initiative=Math.floor(Math.random()*20)+1+a.sct; currentTurnIdx=0; await saveData(); render(); };
-window.rollInitiative = async (armyId) => { const a=armies.find(x=>x.id===armyId); if(a){a.initiative=Math.floor(Math.random()*20)+1+a.sct; await saveData(); render();} };
-window.setInitiative = async (armyId,val) => { const a=armies.find(x=>x.id===armyId); if(a){a.initiative=parseFloat(val)||0; await saveData();} };
+window.rollAllInitiative = async () => {
+  for(const a of armies) a.initiative=Math.floor(Math.random()*20)+1+a.sct;
+  currentTurnIdx=0; await saveData(); render();
+};
+window.rollInitiative = async (armyId) => {
+  const a=armies.find(x=>x.id===armyId); if(a){a.initiative=Math.floor(Math.random()*20)+1+a.sct; await saveData(); render();}
+};
+window.setInitiative = async (armyId,val) => {
+  const a=armies.find(x=>x.id===armyId); if(a){a.initiative=parseFloat(val)||0; await saveData();}
+};
 window.changeHp = async (armyId,delta) => {
   const a=armies.find(x=>x.id===armyId); if(!a) return;
   a.hp=Math.max(0,Math.min(a.maxHp,a.hp+delta));
   if(a.hp===0) OBR.notification.show(`${a.name} is Defeated!`,'WARNING');
-  await saveData(); render();
-};
-window.toggleShot = async (armyId,idx) => {
-  const a=armies.find(x=>x.id===armyId); if(!a) return;
-  const used=a.maxShots-(a.shots||0);
-  a.shots=Math.max(0,Math.min(a.maxShots,idx<used?a.maxShots-idx:a.maxShots-(idx+1)));
   await saveData(); render();
 };
 window.toggleCondition = async (armyId,condKey) => {
@@ -476,140 +439,42 @@ window.toggleCondition = async (armyId,condKey) => {
 window.startRoll = async (armyId,rollType) => {
   if (targetingMode?.armyId===armyId&&targetingMode?.rollType===rollType) { targetingMode=null; await saveData(); render(); return; }
   targetingMode={armyId,rollType}; await saveData(); render();
-  const army=armies.find(a=>a.id===armyId);
-  OBR.notification.show(`${army?.name||''}: select a target below`,'INFO');
 };
-window.executeRoll = async (attackerId,targetId,rollType) => { await resolveRoll(attackerId,targetId,rollType); targetingMode=null; await saveData(); render(); };
+window.executeRoll = async (attackerId,targetId,rollType) => {
+  await resolveRoll(attackerId,targetId,rollType); targetingMode=null; await saveData(); render();
+};
 window.cancelTargeting = async () => { targetingMode=null; await saveData(); render(); };
-window.rollScout = async (armyId) => { const a=armies.find(x=>x.id===armyId); if(!a) return; const roll=Math.floor(Math.random()*20)+1; showResult(`Scout: ${roll+a.sct}`,null,`d20(${roll}) + ${a.sct}`); };
-window.applyPreset = () => {
-  const p=PRESETS[document.getElementById('add-preset')?.value]; if(!p) return;
-  document.getElementById('add-ac').value=p.ac; document.getElementById('add-man').value=p.man;
-  document.getElementById('add-mor').value=p.mor; document.getElementById('add-sct').value=p.sct;
-  document.getElementById('add-atk').value=p.atk; document.getElementById('add-rng').value=p.rng;
-  document.getElementById('add-maxhp').value=p.maxHp; document.getElementById('add-rt').value=p.rt;
-  document.getElementById('add-shots').value=p.shots;
-};
-window.addArmy = async () => {
-  const name=document.getElementById('add-name')?.value?.trim()||'Army';
-  const side=document.getElementById('add-side')?.value;
-  const preset=document.getElementById('add-preset')?.value;
-  const p=PRESETS[preset]||{};
-  const maxHp=parseInt(document.getElementById('add-maxhp')?.value)||p.maxHp||4;
-  const maxShots=parseInt(document.getElementById('add-shots')?.value)||p.shots||0;
-  armies.push({
-    id:crypto.randomUUID(), name, type:p.type||'Custom', friendly:side==='friendly', initiative:0,
-    ac:parseInt(document.getElementById('add-ac')?.value)||p.ac||16,
-    man:parseInt(document.getElementById('add-man')?.value)||p.man||4,
-    mor:parseInt(document.getElementById('add-mor')?.value)||p.mor||10,
-    sct:parseInt(document.getElementById('add-sct')?.value)||p.sct||7,
-    atk:parseInt(document.getElementById('add-atk')?.value)||p.atk||9,
-    rng:parseInt(document.getElementById('add-rng')?.value)||p.rng||0,
-    maxHp, rt:parseInt(document.getElementById('add-rt')?.value)||p.rt||2,
-    maxShots, shots:maxShots, hp:maxHp, conditions:{}, tokenId:null,
-  });
-  await saveData(); showTab('battle');
+window.rollScout = async (armyId) => {
+  const a=armies.find(x=>x.id===armyId); if(!a) return;
+  const roll=Math.floor(Math.random()*20)+1;
+  showResult(`Scout: ${roll+a.sct}`,null,`d20(${roll}) + ${a.sct}`);
 };
 window.deleteArmy = async (armyId) => {
   armies=armies.filter(x=>x.id!==armyId);
-  // Remove from garrisons
   for (const f of fortifications) f.garrisonedArmies=(f.garrisonedArmies||[]).filter(id=>id!==armyId);
   await saveData(); render();
 };
-window.linkTokenById = async (armyId,tokenId) => {
-  if (!tokenId) return;
-  const army=armies.find(a=>a.id===armyId); if(!army) return;
-  for (const a of armies) { if(a.tokenId===tokenId&&a.id!==armyId) a.tokenId=null; }
-  army.tokenId=tokenId;
-  try { await OBR.scene.items.updateItems([tokenId],(items)=>{ for(const i of items) i.metadata[`${ID}/army`]={id:army.id}; }); } catch(e) {}
-  OBR.notification.show(`Token linked to ${army.name}`,'INFO');
-  await saveData(); render();
-};
-
-// ─── Fortification handlers ───────────────────────────────────────
 window.addFort = async () => {
   const name=document.getElementById('fort-name')?.value?.trim()||'Fortification';
   const type=document.getElementById('fort-type')?.value||'keep';
-  const ft=FORT_TYPES[type];
-  fortifications.push({
-    id:crypto.randomUUID(), name, type,
-    ac:ft.ac, maxHp:ft.maxHp, hp:ft.maxHp, maxArmies:ft.maxArmies,
-    garrisonedArmies:[],
-  });
+  fortifications.push({id:crypto.randomUUID(),name,type,maxArmies:FORT_TYPES[type].maxArmies,garrisonedArmies:[]});
   await saveData(); render();
 };
-window.deleteFort = async (fortId) => {
-  fortifications=fortifications.filter(f=>f.id!==fortId);
-  // Remove fortified condition from garrisoned armies
-  await saveData(); render();
-};
-window.changeFortHp = async (fortId,delta) => {
-  const f=fortifications.find(x=>x.id===fortId); if(!f) return;
-  const oldHp=f.hp;
-  f.hp=Math.max(0,Math.min(f.maxHp,f.hp+delta));
-  if (f.hp===0&&oldHp>0) {
-    // Fortification destroyed — shake all garrisoned armies
-    for (const armyId of (f.garrisonedArmies||[])) {
-      const a=armies.find(x=>x.id===armyId);
-      if (a) { a.conditions=a.conditions||{}; a.conditions.shaken=Math.min(4,(a.conditions.shaken||0)+1); a.conditions.fortified=false; delete a.conditions.fortified; }
-    }
-    f.garrisonedArmies=[];
-    OBR.notification.show(`${f.name} destroyed! Garrisoned armies gain Shaken 1`,'ERROR');
-  }
-  await saveData(); render();
-};
+window.deleteFort = async (fortId) => { fortifications=fortifications.filter(f=>f.id!==fortId); await saveData(); render(); };
 window.garrisonArmy = async (fortId) => {
   const f=fortifications.find(x=>x.id===fortId); if(!f) return;
   const armyId=document.getElementById(`garrison-select-${fortId}`)?.value; if(!armyId) return;
   if ((f.garrisonedArmies||[]).length>=f.maxArmies) { OBR.notification.show(`${f.name} is full!`,'WARNING'); return; }
   f.garrisonedArmies=f.garrisonedArmies||[];
   if (!f.garrisonedArmies.includes(armyId)) f.garrisonedArmies.push(armyId);
-  // Apply fortified condition
-  const a=armies.find(x=>x.id===armyId);
-  if (a) { a.conditions=a.conditions||{}; a.conditions.fortified=true; }
+  const a=armies.find(x=>x.id===armyId); if(a){a.conditions=a.conditions||{};a.conditions.fortified=true;}
   await saveData(); render();
 };
 window.removeFromGarrison = async (fortId,armyId) => {
   const f=fortifications.find(x=>x.id===fortId); if(!f) return;
   f.garrisonedArmies=(f.garrisonedArmies||[]).filter(id=>id!==armyId);
-  // Remove fortified condition
-  const a=armies.find(x=>x.id===armyId);
-  if (a&&a.conditions) delete a.conditions.fortified;
+  const a=armies.find(x=>x.id===armyId); if(a&&a.conditions) delete a.conditions.fortified;
   await saveData(); render();
-};
-window.siegeAttackFort = async (attackerId,fortId) => {
-  const atk=armies.find(a=>a.id===attackerId);
-  const fort=fortifications.find(f=>f.id===fortId);
-  if (!atk||!fort) return;
-  const as=getModifiedStats(atk);
-  // Siege uses ranged modifier vs fort AC
-  if ((atk.shots||0)<=0) { showResult('No shots remaining!',null); targetingMode=null; await saveData(); render(); return; }
-  atk.shots=Math.max(0,(atk.shots||0)-1);
-  const roll=Math.floor(Math.random()*20)+1;
-  const total=roll+as.rng;
-  const degree=getDegree(roll,total,fort.ac);
-  let outcome='';
-  if (degree==='crit-success') {
-    fort.hp=Math.max(0,fort.hp-2); outcome=`Crit Hit! ${fort.name} takes 2 damage (${fort.hp}/${fort.maxHp} HP)`;
-  } else if (degree==='success') {
-    fort.hp=Math.max(0,fort.hp-1); outcome=`Hit! ${fort.name} takes 1 damage (${fort.hp}/${fort.maxHp} HP)`;
-  } else if (degree==='failure') { outcome='Miss.'; }
-  else { outcome='Critical Miss!'; }
-  // Check if destroyed
-  if (fort.hp===0) {
-    outcome+=` · ${fort.name} DESTROYED`;
-    for (const armyId of (fort.garrisonedArmies||[])) {
-      const a=armies.find(x=>x.id===armyId);
-      if (a) { a.conditions=a.conditions||{}; a.conditions.shaken=Math.min(4,(a.conditions.shaken||0)+1); delete a.conditions.fortified; }
-    }
-    fort.garrisonedArmies=[];
-    OBR.notification.show(`${fort.name} destroyed! Garrisoned armies gain Shaken 1`,'ERROR');
-  }
-  // Check if damaged (at or below half HP)
-  else if (fort.hp<=Math.floor(fort.maxHp/2)) { outcome+=` · ⚠ Damaged (needs repair)`; }
-  showResult(`${total}`,degree,`d20(${roll}) +${as.rng} vs Fort AC ${fort.ac}`,outcome);
-  OBR.notification.show(`${atk.name} attacks ${fort.name}: ${total} — ${outcome}`,['crit-success','success'].includes(degree)?'INFO':'WARNING');
-  targetingMode=null; await saveData(); render();
 };
 
 // ─── Roll resolution ──────────────────────────────────────────────
@@ -620,7 +485,8 @@ async function resolveRoll(attackerId,targetId,rollType) {
   const roll=Math.floor(Math.random()*20)+1;
   let modifier,dc,label,detail;
   if (rollType==='attack'||rollType==='ranged') {
-    modifier=rollType==='attack'?as.atk:as.rng; dc=ts.ac; label=rollType==='attack'?'Attack':'Ranged'; detail=`vs AC ${dc}`;
+    modifier=rollType==='attack'?as.atk:as.rng; dc=ts.ac;
+    label=rollType==='attack'?'Attack':'Ranged'; detail=`vs AC ${dc}`;
     if (rollType==='ranged') { if((atk.shots||0)<=0){showResult('No shots remaining!',null);return;} atk.shots=Math.max(0,(atk.shots||0)-1); }
   } else if (rollType==='maneuver') { modifier=as.man; dc=ts.manDC; label='Maneuver'; detail=`vs MAN DC ${dc}`; }
   else if (rollType==='morale') { modifier=as.mor; dc=ts.morDC; label='Morale'; detail=`vs MOR DC ${dc}`; }
@@ -650,7 +516,8 @@ async function resolveRoll(attackerId,targetId,rollType) {
 
 function getDegree(roll,total,dc) {
   let d;
-  if (total>=dc+10) d='crit-success'; else if (total>=dc) d='success'; else if (total<=dc-10) d='crit-fail'; else d='failure';
+  if (total>=dc+10) d='crit-success'; else if (total>=dc) d='success';
+  else if (total<=dc-10) d='crit-fail'; else d='failure';
   if (roll===20&&d==='success') d='crit-success'; if (roll===20&&d==='failure') d='success';
   if (roll===1&&d==='crit-success') d='success'; if (roll===1&&d==='success') d='failure';
   return d;
