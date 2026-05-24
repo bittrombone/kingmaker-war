@@ -54,7 +54,17 @@ const CONDITIONS = [
   { key:'engaged',    label:'Engaged',    hasValue:false },
 ];
 
+// Try loading from URL param first for instant render
+const dataParam = params.get('data');
+if (dataParam) {
+  try {
+    army = JSON.parse(decodeURIComponent(dataParam));
+    render(); // render immediately without waiting for OBR
+  } catch(e) {}
+}
+
 OBR.onReady(async () => {
+  // Load fresh data from room metadata
   await loadArmy();
   render();
 
@@ -62,8 +72,8 @@ OBR.onReady(async () => {
     const d = meta[`${ID}/data`];
     if (d) {
       armies = d.armies || [];
-      army = armies.find(a => a.id === armyId);
-      render();
+      const fresh = armies.find(a => a.id === armyId);
+      if (fresh) { army = fresh; render(); }
     }
   });
 });
@@ -74,7 +84,8 @@ async function loadArmy() {
     const d = meta[`${ID}/data`];
     if (d) {
       armies = d.armies || [];
-      army = armies.find(a => a.id === armyId);
+      const fresh = armies.find(a => a.id === armyId);
+      if (fresh) army = fresh; // use room data if available, keeps URL data as fallback
     }
   } catch(e) { console.warn('loadArmy', e); }
 }

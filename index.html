@@ -186,9 +186,11 @@ OBR.onReady(async () => {
         await saveData();
       }
       // Open popover
+      // Encode army data in URL so statcard renders immediately without fetch
+      const armyParam = encodeURIComponent(JSON.stringify(army));
       await OBR.popover.open({
         id: `${ID}/popover-${item.id}`,
-        url: `${BASE_URL}/statcard.html?armyId=${army.id}&itemId=${item.id}`,
+        url: `${BASE_URL}/statcard.html?armyId=${army.id}&itemId=${item.id}&data=${armyParam}`,
         height: 480,
         width: 300,
         anchorElementId: item.id,
@@ -223,8 +225,9 @@ function renderBattle() {
   // Targeting picker
   if (targetingMode) {
     const atk=armies.find(a=>a.id===targetingMode.armyId);
+    const rtDisplay = targetingMode.rollType.replace(/(\d)$/,(m)=>m==='0'?'':m==='1'?' 2':' 3').replace('attack','Strike').replace('ranged','Ranged').replace('maneuver','Maneuver').replace('morale','Morale');
     html+=`<div class="rout-prompt" style="border-color:#EF9F27;background:#2a2200">
-      <h3 style="color:#EF9F27">🎯 ${atk?.name||''} — ${targetingMode.rollType}</h3>`;
+      <h3 style="color:#EF9F27">🎯 ${atk?.name||''} — ${rtDisplay}</h3>`;
     for (const t of armies.filter(a=>a.id!==targetingMode.armyId)) {
       const label=isGM||t.friendly?t.name:'???';
       const hp=isGM||t.friendly?` (${t.hp}/${t.maxHp} HP)`:'';
@@ -281,8 +284,16 @@ function renderBattle() {
       </div>
       <div class="army-card-body">
         <div class="rolls-section"><div class="rolls-label">ROLLS</div><div class="roll-btns">
-          ${activeTurn.atk>0?`<button class="roll-btn ${aw('attack')}" ${dis} onclick="startRoll('${activeTurn.id}','attack')">Attack (+${activeTurn.atk})</button>`:''}
-          ${hasRanged?`<button class="roll-btn ${aw('ranged')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged')">Ranged (+${activeTurn.rng}) [${activeTurn.shots||0}]</button>`:''}
+          ${activeTurn.atk>0?`
+            <button class="roll-btn ${aw('attack0')}" ${dis} onclick="startRoll('${activeTurn.id}','attack0')">Strike (+${activeTurn.atk})</button>
+            <button class="roll-btn ${aw('attack1')}" ${dis} onclick="startRoll('${activeTurn.id}','attack1')" style="opacity:0.8">Strike 2 (+${activeTurn.atk-5})</button>
+            <button class="roll-btn ${aw('attack2')}" ${dis} onclick="startRoll('${activeTurn.id}','attack2')" style="opacity:0.6">Strike 3 (+${activeTurn.atk-10})</button>
+          `:''}
+          ${hasRanged?`
+            <button class="roll-btn ${aw('ranged0')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged0')">Ranged (+${activeTurn.rng}) [${activeTurn.shots||0}]</button>
+            <button class="roll-btn ${aw('ranged1')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged1')" style="opacity:0.8">Ranged 2 (+${activeTurn.rng-5}) [${activeTurn.shots||0}]</button>
+            <button class="roll-btn ${aw('ranged2')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged2')" style="opacity:0.6">Ranged 3 (+${activeTurn.rng-10}) [${activeTurn.shots||0}]</button>
+          `:''}
           <button class="roll-btn ${aw('maneuver')}" ${dis} onclick="startRoll('${activeTurn.id}','maneuver')">Maneuver (+${s.man})</button>
           <button class="roll-btn ${aw('morale')}" ${dis} onclick="startRoll('${activeTurn.id}','morale')">Morale (+${s.mor})</button>
           <button class="roll-btn" onclick="rollScout('${activeTurn.id}')">Scout (+${activeTurn.sct})</button>
@@ -484,10 +495,14 @@ async function resolveRoll(attackerId,targetId,rollType) {
   const as=getModifiedStats(atk); const ts=getModifiedStats(tgt);
   const roll=Math.floor(Math.random()*20)+1;
   let modifier,dc,label,detail;
-  if (rollType==='attack'||rollType==='ranged') {
-    modifier=rollType==='attack'?as.atk:as.rng; dc=ts.ac;
-    label=rollType==='attack'?'Attack':'Ranged'; detail=`vs AC ${dc}`;
-    if (rollType==='ranged') { if((atk.shots||0)<=0){showResult('No shots remaining!',null);return;} atk.shots=Math.max(0,(atk.shots||0)-1); }
+  if (rollType.startsWith('attack')||rollType.startsWith('ranged')) {
+    const isRanged = rollType.startsWith('ranged');
+    const mapNum = parseInt(rollType.slice(-1))||0;
+    const map = mapNum===0?0:mapNum===1?-5:-10;
+    modifier=(isRanged?as.rng:as.atk)+map; dc=ts.ac;
+    label=isRanged?'Ranged':'Attack';
+    detail=`vs AC ${dc}${map!==0?` (MAP ${map})`:''}`;
+    if (isRanged) { if((atk.shots||0)<=0){showResult('No shots remaining!',null);return;} atk.shots=Math.max(0,(atk.shots||0)-1); }
   } else if (rollType==='maneuver') { modifier=as.man; dc=ts.manDC; label='Maneuver'; detail=`vs MAN DC ${dc}`; }
   else if (rollType==='morale') { modifier=as.mor; dc=ts.morDC; label='Morale'; detail=`vs MOR DC ${dc}`; }
   const total=roll+modifier; const degree=getDegree(roll,total,dc); let outcome='';
