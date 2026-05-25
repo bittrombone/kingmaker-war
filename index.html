@@ -161,7 +161,7 @@ OBR.onReady(async () => {
       label: 'Army Stat Card',
       filter: { every: [{ key:'layer', value:'CHARACTER', operator:'==' }] },
     }],
-    async onClick(context) {
+    async onClick(context, elementId) {
       const item = context.items[0]; if (!item) return;
       // Read fresh data
       try { const m=await OBR.room.getMetadata(); const d=m[`${ID}/data`]; if(d){armies=d.armies||[];} } catch(e) {}
@@ -185,18 +185,14 @@ OBR.onReady(async () => {
         armies.push(army);
         await saveData();
       }
-      // Open popover
-      // Encode army data in URL so statcard renders immediately without fetch
+      // Open popover anchored to token element
       const armyParam = encodeURIComponent(JSON.stringify(army));
       await OBR.popover.open({
-        id: `${ID}/popover-${item.id}`,
+        id: `${ID}/popover`,
         url: `${BASE_URL}/statcard.html?armyId=${army.id}&itemId=${item.id}&data=${armyParam}`,
         height: 480,
         width: 300,
-        anchorElementId: item.id,
-        anchorReference: 'ELEMENT',
-        anchorOrigin: { vertical:'BOTTOM', horizontal:'CENTER' },
-        transformOrigin: { vertical:'TOP', horizontal:'CENTER' },
+        anchorElementId: elementId,
       });
     }
   });
