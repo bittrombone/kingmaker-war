@@ -110,8 +110,8 @@ async function updateNameTags() {
       if (!token) continue;
 
       const isActive = activeTurn?.id === army.id;
-      const labelColor = isActive ? '#EF9F27' : army.friendly ? '#7EC8E3' : '#F09595';
-      const bgColor = isActive ? '#2a2200' : '#111110';
+      const labelColor = isActive ? '#00FF88' : army.friendly ? '#7EC8E3' : '#F09595';
+      const bgColor = isActive ? '#002211' : '#111110';
       const tagId = army.tokenId + '_tag';
 
       // Check if tag already exists
