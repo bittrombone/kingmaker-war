@@ -89,10 +89,76 @@ async function saveData() {
   if (!dataLoaded) return;
   try {
     await OBR.room.setMetadata({[`${ID}/data`]:{armies,fortifications,round,currentTurnIdx,routQueue,targetingMode}});
+    // Update name tags whenever data changes
+    updateNameTags();
   } catch(e) { console.warn('saveData',e); }
 }
 
-// Sync armies from token metadata on scene
+// ─── Name tags ───────────────────────────────────────────────────
+const NAME_TAG_KEY = `${ID}/nametag`;
+
+async function updateNameTags() {
+  if (!dataLoaded) return;
+  try {
+    const sorted = [...armies].sort((a,b)=>(b.initiative||0)-(a.initiative||0));
+    const activeTurn = sorted[currentTurnIdx];
+    const items = await OBR.scene.items.getItems();
+
+    for (const army of armies) {
+      if (!army.tokenId) continue;
+      const token = items.find(i=>i.id===army.tokenId);
+      if (!token) continue;
+
+      const isActive = activeTurn?.id === army.id;
+      const labelColor = isActive ? '#EF9F27' : army.friendly ? '#7EC8E3' : '#F09595';
+      const bgColor = isActive ? '#2a2200' : '#111110';
+      const tagId = army.tokenId + '_tag';
+
+      // Check if tag already exists
+      const existingTag = items.find(i=>i.id===tagId||i.metadata?.[NAME_TAG_KEY]===army.tokenId);
+
+      if (existingTag) {
+        // Update existing tag
+        await OBR.scene.items.updateItems([existingTag.id], (tagItems) => {
+          for (const t of tagItems) {
+            t.text = { ...t.text, plainText: army.name, style: { ...t.text?.style, fillColor: labelColor } };
+          }
+        });
+      } else {
+        // Create new text label attached to token
+        const { buildText } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
+        const grid = await OBR.scene.grid.getDpi();
+        const label = buildText()
+          .plainText(army.name)
+          .position({ x: token.position.x, y: token.position.y + grid * 0.6 })
+          .layer('TEXT')
+          .locked(true)
+          .visible(true)
+          .textType('PLAIN')
+          .fontSize(16)
+          .fontWeight(600)
+          .textAlign('CENTER')
+          .fillColor(labelColor)
+          .strokeColor(bgColor)
+          .strokeWidth(3)
+          .attachedTo(army.tokenId)
+          .metadata({ [NAME_TAG_KEY]: army.tokenId })
+          .build();
+        await OBR.scene.items.addItems([label]);
+      }
+    }
+  } catch(e) { console.warn('updateNameTags', e); }
+}
+
+async function removeNameTag(tokenId) {
+  try {
+    const items = await OBR.scene.items.getItems();
+    const tag = items.find(i=>i.metadata?.[NAME_TAG_KEY]===tokenId);
+    if (tag) await OBR.scene.items.deleteItems([tag.id]);
+  } catch(e) {}
+}
+
+// ─── Sync armies from token metadata on scene
 async function syncArmiesFromTokens() {
   try {
     const items = await OBR.scene.items.getItems();
@@ -136,6 +202,7 @@ OBR.onReady(async () => {
   await syncArmiesFromTokens();
   dataLoaded = true;
   render();
+  updateNameTags();
 
   OBR.room.onMetadataChange((meta) => {
     const d = meta[`${ID}/data`];
@@ -457,6 +524,8 @@ window.rollScout = async (armyId) => {
   showResult(`Scout: ${roll+a.sct}`,null,`d20(${roll}) + ${a.sct}`);
 };
 window.deleteArmy = async (armyId) => {
+  const a = armies.find(x=>x.id===armyId);
+  if (a?.tokenId) removeNameTag(a.tokenId);
   armies=armies.filter(x=>x.id!==armyId);
   for (const f of fortifications) f.garrisonedArmies=(f.garrisonedArmies||[]).filter(id=>id!==armyId);
   await saveData(); render();
