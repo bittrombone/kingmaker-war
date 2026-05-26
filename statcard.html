@@ -201,7 +201,25 @@ function renderCard() {
         </div>
       </div>
     `:''}
-    ${scTab==='conds'?`<div class="conds-grid" style="margin-bottom:8px">${condBtns}</div>`:''}
+    ${scTab==='conds'?`
+      <div class="conds-grid" style="margin-bottom:8px">${condBtns}</div>
+      ${(()=>{
+        const c = army.conditions || {};
+        const effects = [];
+        if (c.shaken)     effects.push(`<div style="font-size:11px;padding:3px 0;border-bottom:0.5px solid #222"><span style="color:#EF9F27">Shaken ${c.shaken}</span> — Morale checks −${c.shaken}</div>`);
+        if (c.weary)      effects.push(`<div style="font-size:11px;padding:3px 0;border-bottom:0.5px solid #222"><span style="color:#9F8FEF">Weary ${c.weary}</span> — AC −${c.weary}, Maneuver −${c.weary}, all checks −${c.weary} (Deploy −${c.weary*2})</div>`);
+        if (c.mired)      effects.push(`<div style="font-size:11px;padding:3px 0;border-bottom:0.5px solid #222"><span style="color:#88CC33">Mired ${c.mired}</span> — Maneuver −${c.mired}${c.mired>=4?' · <span style=\'color:#E24B4A\'>PINNED</span>':''}</div>`);
+        if (c.outflanked) effects.push(`<div style="font-size:11px;padding:3px 0;border-bottom:0.5px solid #222"><span style="color:#E24B4A">Outflanked</span> — AC −2</div>`);
+        if (c.fortified)  effects.push(`<div style="font-size:11px;padding:3px 0;border-bottom:0.5px solid #222"><span style="color:#378ADD">Fortified</span> — AC +4, Morale to rally +4 · Cannot engage or be engaged</div>`);
+        if (c.routed)     effects.push(`<div style="font-size:11px;padding:3px 0;border-bottom:0.5px solid #222"><span style="color:#D85A30">Routed</span> — Must Retreat each turn, Morale −2 · Auto-ends after encounter (+Shaken 1)</div>`);
+        if (c.pinned)     effects.push(`<div style="font-size:11px;padding:3px 0;border-bottom:0.5px solid #222"><span style="color:#C0392B">Pinned</span> — Outflanked + cannot use Maneuver actions · Cannot deploy</div>`);
+        if (c.distant)    effects.push(`<div style="font-size:11px;padding:3px 0;border-bottom:0.5px solid #222"><span style="color:#80C0FF">Distant</span> — Incoming ranged attacks −5 to hit</div>`);
+        if (c.concealed)  effects.push(`<div style="font-size:11px;padding:3px 0;border-bottom:0.5px solid #222"><span style="color:#5DCAA5">Concealed</span> — Maneuver +2, attacks against this army −2</div>`);
+        if (c.engaged)    effects.push(`<div style="font-size:11px;padding:3px 0;border-bottom:0.5px solid #222"><span style="color:#FF8C42">Engaged</span> — Can use melee strikes · Provokes reactions on Maneuver actions</div>`);
+        if (effects.length === 0) return '<div style="font-size:11px;color:#555;padding:4px 0">No active conditions</div>';
+        return '<div style="margin-top:6px;background:#1a1a18;border-radius:4px;padding:6px 8px">' + effects.join('') + '</div>';
+      })()}
+    `:''}
     <button class="save-btn" onclick="doSave()">Save</button>
   `;
 }
