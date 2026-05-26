@@ -133,6 +133,17 @@ function renderCard() {
       <div class="sc-tab ${scTab==='conds'?'active':''}" onclick="switchTab('conds')">Conditions</div>
     </div>
     ${scTab==='stats'?`
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <div style="flex:1">
+          <label style="font-size:9px;color:#666;display:block;margin-bottom:2px">TYPE</label>
+          <select style="width:100%;padding:3px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px" onchange="setStat('type',this.value)">
+            <option value="Infantry"   ${(army.type||'Infantry')==='Infantry'  ?'selected':''}>Infantry</option>
+            <option value="Cavalry"    ${army.type==='Cavalry'   ?'selected':''}>Cavalry</option>
+            <option value="Skirmisher" ${army.type==='Skirmisher'?'selected':''}>Skirmisher</option>
+            <option value="Siege"      ${army.type==='Siege'     ?'selected':''}>Siege</option>
+          </select>
+        </div>
+      </div>
       <div class="stat-edit-grid">
         <div class="stat-edit"><label>AC${gb.ac?` <span style='color:#5DCAA5'>+${gb.ac}</span>`:''}</label><input type="number" value="${army.ac}" onchange="setStat('ac',this.value)"/></div>
         <div class="stat-edit"><label>MAN</label><input type="number" value="${army.man}" onchange="setStat('man',this.value)"/></div>
@@ -196,7 +207,7 @@ function renderCard() {
 }
 
 window.setSide = (f) => { army.friendly=f; renderCard(); };
-window.setStat = (s,v) => { army[s]=parseInt(v)||0; if(s==='maxHp') army.hp=Math.min(army.hp,army.maxHp); };
+window.setStat = (s,v) => { if(s==='type') army[s]=v; else { army[s]=parseInt(v)||0; if(s==='maxHp') army.hp=Math.min(army.hp,army.maxHp); } };
 window.switchTab = (t) => { scTab=t; renderCard(); };
 window.changeHp = (d) => { army.hp=Math.max(0,Math.min(army.maxHp,army.hp+d)); renderCard(); };
 window.toggleCond = (k) => {
