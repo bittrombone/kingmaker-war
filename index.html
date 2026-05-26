@@ -251,6 +251,35 @@ OBR.onReady(async () => {
     }
   });
 
+  // Poll localStorage for saves from statcard popover (fallback for sandboxed iframes)
+  setInterval(async () => {
+    try {
+      const raw = localStorage.getItem('KW_SAVE_ARMY');
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      // Only process recent saves (within last 5 seconds)
+      if (!data.ts || Date.now() - data.ts > 5000) { localStorage.removeItem('KW_SAVE_ARMY'); return; }
+      localStorage.removeItem('KW_SAVE_ARMY');
+      const updated = data.army;
+      const itemId = data.itemId;
+      if (!updated) return;
+      const idx = armies.findIndex(a => a.id === updated.id);
+      if (idx >= 0) armies[idx] = updated; else armies.push(updated);
+      if (itemId) {
+        try {
+          await OBR.scene.items.updateItems([itemId], (items) => {
+            for (const i of items) {
+              i.name = updated.name;
+              i.metadata[`${ID}/army`] = { id:updated.id, friendly:updated.friendly, ac:updated.ac, man:updated.man, mor:updated.mor, sct:updated.sct, atk:updated.atk, rng:updated.rng, maxHp:updated.maxHp, rt:updated.rt, maxShots:updated.maxShots, shots:updated.shots, hp:updated.hp, conditions:updated.conditions, gear:updated.gear };
+            }
+          });
+        } catch(e) {}
+      }
+      await saveData(); render(); updateNameTags();
+      OBR.notification.show(`${updated.name} saved`, 'INFO');
+    } catch(e) {}
+  }, 500);
+
   // Sync when tokens change
   OBR.scene.items.onChange(async () => {
     await syncArmiesFromTokens();

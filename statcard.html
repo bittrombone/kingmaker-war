@@ -79,7 +79,12 @@ window.addEventListener('message', (event) => {
 });
 
 function sendToParent(type, payload) {
-  window.parent?.postMessage({ type, ...payload }, '*');
+  // Try postMessage to parent
+  try { window.parent?.postMessage({ type, ...payload }, '*'); } catch(e) {}
+  // Also try top window
+  try { window.top?.postMessage({ type, ...payload }, '*'); } catch(e) {}
+  // Store in localStorage as fallback so index.html can poll for it
+  try { localStorage.setItem(`KW_${type}`, JSON.stringify({ type, ...payload, ts: Date.now() })); } catch(e) {}
 }
 
 function renderCard() {
@@ -217,6 +222,9 @@ window.usePotion = () => {
 window.doSave = () => {
   army.name=document.getElementById('army-name')?.value?.trim()||army.name;
   sendToParent('SAVE_ARMY', { army, itemId });
+  // Visual feedback
+  const btn = document.querySelector('.save-btn');
+  if (btn) { btn.textContent='Saved ✓'; btn.style.background='#5DCAA5'; setTimeout(()=>{btn.textContent='Save';btn.style.background='#EF9F27';},1500); }
 };
 </script>
 </body>
