@@ -23,6 +23,16 @@
     .save-btn { width: 100%; padding: 8px; background: #EF9F27; color: #111; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 13px; margin-top: 4px; }
     .save-btn:hover { background: #d4891f; }
     .divider { border: none; border-top: 0.5px solid #333; margin: 8px 0; }
+    .sc-tabs { display: flex; border-bottom: 1px solid #333; margin-bottom: 8px; }
+    .sc-tab { flex: 1; padding: 6px; text-align: center; cursor: pointer; font-size: 11px; color: #666; border-bottom: 2px solid transparent; }
+    .sc-tab.active { color: #EF9F27; border-bottom-color: #EF9F27; }
+    .gear-item { display: flex; align-items: center; justify-content: space-between; padding: 5px 6px; background: #1a1a18; border-radius: 4px; margin-bottom: 4px; font-size: 12px; }
+    .gear-name { color: #D3D1C7; flex: 1; }
+    .gear-bonus { font-size: 11px; color: #5DCAA5; margin-left: 6px; }
+    .gear-remove { background: none; border: none; color: #666; cursor: pointer; font-size: 14px; padding: 0 2px; }
+    .gear-remove:hover { color: #E24B4A; }
+    .gear-add-row { display: flex; gap: 4px; margin-top: 6px; }
+    .gear-select { flex: 1; padding: 4px 6px; background: #111; border: 1px solid #333; border-radius: 3px; color: #D3D1C7; font-size: 11px; }
   </style>
 </head>
 <body>
@@ -61,6 +71,33 @@ if (dataParam) {
     army = JSON.parse(decodeURIComponent(dataParam));
     render(); // render immediately without waiting for OBR
   } catch(e) {}
+}
+
+let scTab = 'stats'; // 'stats' or 'gear'
+
+const GEAR_OPTIONS = [
+  { id:'magic_weapon_1',   label:'Magic Weapons',         bonus:'+1 ATK/RNG',  atk:1,  rng:1,  ac:0,  man:0,  mor:0 },
+  { id:'magic_weapon_2',   label:'Greater Magic Weapons',  bonus:'+2 ATK/RNG',  atk:2,  rng:2,  ac:0,  man:0,  mor:0 },
+  { id:'magic_weapon_3',   label:'Major Magic Weapons',    bonus:'+3 ATK/RNG',  atk:3,  rng:3,  ac:0,  man:0,  mor:0 },
+  { id:'magic_armor_1',    label:'Magic Armor',            bonus:'+1 AC',       atk:0,  rng:0,  ac:1,  man:0,  mor:0 },
+  { id:'magic_armor_2',    label:'Greater Magic Armor',    bonus:'+2 AC',       atk:0,  rng:0,  ac:2,  man:0,  mor:0 },
+  { id:'magic_armor_3',    label:'Major Magic Armor',      bonus:'+3 AC',       atk:0,  rng:0,  ac:3,  man:0,  mor:0 },
+  { id:'additional_weapon',label:'Additional Weapon',      bonus:'Melee+Ranged', atk:0, rng:0,  ac:0,  man:0,  mor:0, special:'additional_weapon' },
+  { id:'healing_potions',  label:'Healing Potions (3)',    bonus:'3x heal 1 HP', atk:0, rng:0,  ac:0,  man:0,  mor:0, special:'healing_potions', charges:3 },
+];
+
+function getGearBonuses(gear) {
+  const bonuses = { atk:0, rng:0, ac:0, man:0, mor:0 };
+  for (const g of (gear||[])) {
+    const opt = GEAR_OPTIONS.find(o=>o.id===g.id);
+    if (!opt) continue;
+    bonuses.atk += opt.atk||0;
+    bonuses.rng += opt.rng||0;
+    bonuses.ac  += opt.ac||0;
+    bonuses.man += opt.man||0;
+    bonuses.mor += opt.mor||0;
+  }
+  return bonuses;
 }
 
 OBR.onReady(async () => {
@@ -122,6 +159,8 @@ function render() {
   const card = document.getElementById('card');
   if (!army) { card.innerHTML=`<div style="font-size:11px;color:#666;text-align:center;padding:20px">Army not found</div>`; return; }
   const c = army.conditions || {};
+  const gear = army.gear || [];
+  const gearBonuses = getGearBonuses(gear);
   const hpPct = army.maxHp > 0 ? (army.hp / army.maxHp) * 100 : 0;
   const hpColor = hpPct > 50 ? '#378ADD' : hpPct > 25 ? '#EF9F27' : '#E24B4A';
 
@@ -131,6 +170,45 @@ function render() {
     const val = cond.hasValue && c[cond.key] > 0 ? `<span class="cond-value">${c[cond.key]}</span>` : '';
     condBtns += `<button class="cond-btn ${active} ${cond.key}" onclick="toggleCond('${cond.key}')">${cond.label}${val}</button>`;
   }
+
+  // Equipped gear list
+  let gearHtml = '';
+  if (gear.length === 0) {
+    gearHtml = `<div style="font-size:11px;color:#555;margin-bottom:6px">No gear equipped</div>`;
+  } else {
+    for (const g of gear) {
+      const opt = GEAR_OPTIONS.find(o=>o.id===g.id);
+      if (!opt) continue;
+      let extraHtml = '';
+      if (opt.special==='healing_potions') {
+        const charges = g.charges||0;
+        extraHtml = `<span style="font-size:10px;color:#888">${charges} left</span>
+          <button class="rout-btn holds" style="padding:1px 6px;font-size:10px" onclick="usePotion('${g.uid}')">Use</button>`;
+      }
+      gearHtml += `<div class="gear-item">
+        <span class="gear-name">${opt.label}</span>
+        <span class="gear-bonus">${opt.bonus}</span>
+        ${extraHtml}
+        <button class="gear-remove" onclick="removeGear('${g.uid}')">✕</button>
+      </div>`;
+    }
+  }
+
+  // Bonus summary
+  const bonusSummary = Object.entries(gearBonuses)
+    .filter(([,v])=>v!==0)
+    .map(([k,v])=>`${k.toUpperCase()} ${v>0?'+':''}${v}`)
+    .join(' · ');
+
+  // Available gear to add (exclude already equipped unique items)
+  const equippedIds = gear.map(g=>g.id);
+  const availableGear = GEAR_OPTIONS.filter(o => {
+    // Allow multiple potions? No — one set only. Allow weapon/armor tiers — only one per category
+    if (o.id.startsWith('magic_weapon') && equippedIds.some(id=>id.startsWith('magic_weapon'))) return false;
+    if (o.id.startsWith('magic_armor') && equippedIds.some(id=>id.startsWith('magic_armor'))) return false;
+    if (equippedIds.includes(o.id)) return false;
+    return true;
+  });
 
   card.innerHTML = `
     <div class="name-row">
@@ -152,22 +230,43 @@ function render() {
       </div>
     </div>
 
-    <div class="section-label">STATS</div>
-    <div class="stat-edit-grid">
-      <div class="stat-edit"><label>AC</label><input type="number" value="${army.ac}" onchange="setStat('ac',this.value)"/></div>
-      <div class="stat-edit"><label>MAN</label><input type="number" value="${army.man}" onchange="setStat('man',this.value)"/></div>
-      <div class="stat-edit"><label>MOR</label><input type="number" value="${army.mor}" onchange="setStat('mor',this.value)"/></div>
-      <div class="stat-edit"><label>SCT</label><input type="number" value="${army.sct}" onchange="setStat('sct',this.value)"/></div>
-      <div class="stat-edit"><label>ATK</label><input type="number" value="${army.atk}" onchange="setStat('atk',this.value)"/></div>
-      <div class="stat-edit"><label>RNG</label><input type="number" value="${army.rng}" onchange="setStat('rng',this.value)"/></div>
-      <div class="stat-edit"><label>Max HP</label><input type="number" value="${army.maxHp}" onchange="setStat('maxHp',this.value)"/></div>
-      <div class="stat-edit"><label>RT</label><input type="number" value="${army.rt}" onchange="setStat('rt',this.value)"/></div>
-      <div class="stat-edit"><label>Shots</label><input type="number" value="${army.maxShots||0}" onchange="setStat('maxShots',this.value)"/></div>
+    <div class="sc-tabs">
+      <div class="sc-tab ${scTab==='stats'?'active':''}" onclick="switchTab('stats')">Stats</div>
+      <div class="sc-tab ${scTab==='gear'?'active':''}" onclick="switchTab('gear')">Gear</div>
+      <div class="sc-tab ${scTab==='conds'?'active':''}" onclick="switchTab('conds')">Conditions</div>
     </div>
 
-    <div class="divider"></div>
-    <div class="section-label">CONDITIONS</div>
-    <div class="conds-grid" style="margin-bottom:8px">${condBtns}</div>
+    ${scTab==='stats'?`
+      <div class="stat-edit-grid">
+        <div class="stat-edit"><label>AC ${gearBonuses.ac?`<span style='color:#5DCAA5'>+${gearBonuses.ac}</span>`:''}</label><input type="number" value="${army.ac}" onchange="setStat('ac',this.value)"/></div>
+        <div class="stat-edit"><label>MAN</label><input type="number" value="${army.man}" onchange="setStat('man',this.value)"/></div>
+        <div class="stat-edit"><label>MOR</label><input type="number" value="${army.mor}" onchange="setStat('mor',this.value)"/></div>
+        <div class="stat-edit"><label>SCT</label><input type="number" value="${army.sct}" onchange="setStat('sct',this.value)"/></div>
+        <div class="stat-edit"><label>ATK ${gearBonuses.atk?`<span style='color:#5DCAA5'>+${gearBonuses.atk}</span>`:''}</label><input type="number" value="${army.atk}" onchange="setStat('atk',this.value)"/></div>
+        <div class="stat-edit"><label>RNG ${gearBonuses.rng?`<span style='color:#5DCAA5'>+${gearBonuses.rng}</span>`:''}</label><input type="number" value="${army.rng}" onchange="setStat('rng',this.value)"/></div>
+        <div class="stat-edit"><label>Max HP</label><input type="number" value="${army.maxHp}" onchange="setStat('maxHp',this.value)"/></div>
+        <div class="stat-edit"><label>RT</label><input type="number" value="${army.rt}" onchange="setStat('rt',this.value)"/></div>
+        <div class="stat-edit"><label>Shots</label><input type="number" value="${army.maxShots||0}" onchange="setStat('maxShots',this.value)"/></div>
+      </div>
+    `:''}
+
+    ${scTab==='gear'?`
+      <div style="margin-bottom:4px">
+        ${gearHtml}
+        ${bonusSummary?`<div style="font-size:10px;color:#5DCAA5;margin-bottom:6px">Active bonuses: ${bonusSummary}</div>`:''}
+        ${availableGear.length>0?`<div class="gear-add-row">
+          <select class="gear-select" id="gear-picker">
+            <option value="">— add gear —</option>
+            ${availableGear.map(o=>`<option value="${o.id}">${o.label} (${o.bonus})</option>`).join('')}
+          </select>
+          <button class="rout-btn holds" style="padding:4px 10px" onclick="addGear()">Add</button>
+        </div>`:'<div style="font-size:11px;color:#555">All gear slots filled</div>'}
+      </div>
+    `:''}
+
+    ${scTab==='conds'?`
+      <div class="conds-grid" style="margin-bottom:8px">${condBtns}</div>
+    `:''}
 
     <button class="save-btn" onclick="save()">Save</button>
   `;
@@ -196,8 +295,38 @@ window.toggleCond = async (condKey) => {
   if (condKey==='pinned'&&army.conditions.pinned) army.conditions.outflanked=true;
   await saveArmy(); render();
 };
+window.switchTab = (tab) => { scTab = tab; render(); };
+
+window.addGear = async () => {
+  const sel = document.getElementById('gear-picker');
+  const gearId = sel?.value; if (!gearId) return;
+  const opt = GEAR_OPTIONS.find(o=>o.id===gearId); if (!opt) return;
+  army.gear = army.gear || [];
+  const entry = { id: gearId, uid: crypto.randomUUID() };
+  if (opt.special==='healing_potions') entry.charges = 3;
+  army.gear.push(entry);
+  await saveArmy(); render();
+};
+
+window.removeGear = async (uid) => {
+  army.gear = (army.gear||[]).filter(g=>g.uid!==uid);
+  await saveArmy(); render();
+};
+
+window.usePotion = async (uid) => {
+  const g = (army.gear||[]).find(x=>x.uid===uid); if (!g) return;
+  if ((g.charges||0) <= 0) { alert('No charges remaining'); return; }
+  g.charges--;
+  army.hp = Math.min(army.maxHp, army.hp + 1);
+  if (g.charges === 0) army.gear = army.gear.filter(x=>x.uid!==uid);
+  await saveArmy(); render();
+};
+
 window.save = async () => {
   army.name = document.getElementById('army-name')?.value?.trim() || army.name;
+  // Apply gear bonuses to effective stats (store base + gear separately)
+  const bonuses = getGearBonuses(army.gear||[]);
+  army.gearBonuses = bonuses;
   await saveArmy();
   OBR.notification.show(`${army.name} saved`,'INFO');
 };

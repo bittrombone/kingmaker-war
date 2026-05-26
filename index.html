@@ -58,15 +58,27 @@ const CONDITIONS = [
   { key:'engaged',    label:'Engaged',    hasValue:false },
 ];
 
+function getGearBonuses(gear) {
+  const GEAR = {
+    magic_weapon_1:{atk:1,rng:1,ac:0}, magic_weapon_2:{atk:2,rng:2,ac:0}, magic_weapon_3:{atk:3,rng:3,ac:0},
+    magic_armor_1:{atk:0,rng:0,ac:1}, magic_armor_2:{atk:0,rng:0,ac:2}, magic_armor_3:{atk:0,rng:0,ac:3},
+    additional_weapon:{atk:0,rng:0,ac:0}, healing_potions:{atk:0,rng:0,ac:0},
+  };
+  const b={atk:0,rng:0,ac:0};
+  for (const g of (gear||[])) { const o=GEAR[g.id]||{}; b.atk+=(o.atk||0); b.rng+=(o.rng||0); b.ac+=(o.ac||0); }
+  return b;
+}
+
 function getModifiedStats(army) {
   const c = army.conditions || {};
   const shaken=c.shaken||0, weary=c.weary||0, mired=c.mired||0;
   const outflanked=c.outflanked?2:0, fortified=c.fortified?4:0;
+  const gb = getGearBonuses(army.gear);
   return {
-    ac:army.ac-weary-outflanked+fortified,
+    ac:army.ac-weary-outflanked+fortified+gb.ac,
     man:army.man-weary-mired,
     mor:army.mor-shaken+fortified,
-    atk:army.atk, rng:army.rng, sct:army.sct,
+    atk:army.atk+gb.atk, rng:army.rng+gb.rng, sct:army.sct,
     manDC:10+army.man-weary-mired,
     morDC:10+army.mor-shaken,
   };
@@ -103,6 +115,8 @@ async function updateNameTags() {
     const sorted = [...armies].sort((a,b)=>(b.initiative||0)-(a.initiative||0));
     const activeTurn = sorted[currentTurnIdx];
     const items = await OBR.scene.items.getItems();
+    const { buildText } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
+    const grid = await OBR.scene.grid.getDpi();
 
     for (const army of armies) {
       if (!army.tokenId) continue;
@@ -111,41 +125,31 @@ async function updateNameTags() {
 
       const isActive = activeTurn?.id === army.id;
       const labelColor = isActive ? '#00FF88' : army.friendly ? '#7EC8E3' : '#F09595';
-      const bgColor = isActive ? '#002211' : '#111110';
-      const tagId = army.tokenId + '_tag';
+      const strokeColor = isActive ? '#003311' : '#111110';
 
-      // Check if tag already exists
-      const existingTag = items.find(i=>i.id===tagId||i.metadata?.[NAME_TAG_KEY]===army.tokenId);
-
-      if (existingTag) {
-        // Update existing tag
-        await OBR.scene.items.updateItems([existingTag.id], (tagItems) => {
-          for (const t of tagItems) {
-            t.text = { ...t.text, plainText: army.name, style: { ...t.text?.style, fillColor: labelColor } };
-          }
-        });
-      } else {
-        // Create new text label attached to token
-        const { buildText } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
-        const grid = await OBR.scene.grid.getDpi();
-        const label = buildText()
-          .plainText(army.name)
-          .position({ x: token.position.x, y: token.position.y + grid * 0.6 })
-          .layer('TEXT')
-          .locked(true)
-          .visible(true)
-          .textType('PLAIN')
-          .fontSize(16)
-          .fontWeight(600)
-          .textAlign('CENTER')
-          .fillColor(labelColor)
-          .strokeColor(bgColor)
-          .strokeWidth(3)
-          .attachedTo(army.tokenId)
-          .metadata({ [NAME_TAG_KEY]: army.tokenId })
-          .build();
-        await OBR.scene.items.addItems([label]);
+      // Always delete existing tag and recreate to ensure color updates
+      const existingTags = items.filter(i=>i.metadata?.[NAME_TAG_KEY]===army.tokenId);
+      if (existingTags.length > 0) {
+        await OBR.scene.items.deleteItems(existingTags.map(t=>t.id));
       }
+
+      const label = buildText()
+        .plainText(army.name)
+        .position({ x: token.position.x, y: token.position.y + grid * 0.6 })
+        .layer('TEXT')
+        .locked(true)
+        .visible(true)
+        .textType('PLAIN')
+        .fontSize(16)
+        .fontWeight(600)
+        .textAlign('CENTER')
+        .fillColor(labelColor)
+        .strokeColor(strokeColor)
+        .strokeWidth(3)
+        .attachedTo(army.tokenId)
+        .metadata({ [NAME_TAG_KEY]: army.tokenId })
+        .build();
+      await OBR.scene.items.addItems([label]);
     }
   } catch(e) { console.warn('updateNameTags', e); }
 }
@@ -347,15 +351,15 @@ function renderBattle() {
       </div>
       <div class="army-card-body">
         <div class="rolls-section"><div class="rolls-label">ROLLS</div><div class="roll-btns">
-          ${activeTurn.atk>0?`
-            <button class="roll-btn ${aw('attack0')}" ${dis} onclick="startRoll('${activeTurn.id}','attack0')">Strike (+${activeTurn.atk})</button>
-            <button class="roll-btn ${aw('attack1')}" ${dis} onclick="startRoll('${activeTurn.id}','attack1')" style="opacity:0.8">Strike 2 (+${activeTurn.atk-5})</button>
-            <button class="roll-btn ${aw('attack2')}" ${dis} onclick="startRoll('${activeTurn.id}','attack2')" style="opacity:0.6">Strike 3 (+${activeTurn.atk-10})</button>
+          ${activeTurn.atk>0||s.atk>0?`
+            <button class="roll-btn ${aw('attack0')}" ${dis} onclick="startRoll('${activeTurn.id}','attack0')">Strike (+${s.atk})</button>
+            <button class="roll-btn ${aw('attack1')}" ${dis} onclick="startRoll('${activeTurn.id}','attack1')" style="opacity:0.8">Strike 2 (+${s.atk-5})</button>
+            <button class="roll-btn ${aw('attack2')}" ${dis} onclick="startRoll('${activeTurn.id}','attack2')" style="opacity:0.6">Strike 3 (+${s.atk-10})</button>
           `:''}
           ${hasRanged?`
-            <button class="roll-btn ${aw('ranged0')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged0')">Ranged (+${activeTurn.rng}) [${activeTurn.shots||0}]</button>
-            <button class="roll-btn ${aw('ranged1')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged1')" style="opacity:0.8">Ranged 2 (+${activeTurn.rng-5}) [${activeTurn.shots||0}]</button>
-            <button class="roll-btn ${aw('ranged2')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged2')" style="opacity:0.6">Ranged 3 (+${activeTurn.rng-10}) [${activeTurn.shots||0}]</button>
+            <button class="roll-btn ${aw('ranged0')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged0')">Ranged (+${s.rng}) [${activeTurn.shots||0}]</button>
+            <button class="roll-btn ${aw('ranged1')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged1')" style="opacity:0.8">Ranged 2 (+${s.rng-5}) [${activeTurn.shots||0}]</button>
+            <button class="roll-btn ${aw('ranged2')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged2')" style="opacity:0.6">Ranged 3 (+${s.rng-10}) [${activeTurn.shots||0}]</button>
           `:''}
           <button class="roll-btn ${aw('maneuver')}" ${dis} onclick="startRoll('${activeTurn.id}','maneuver')">Maneuver (+${s.man})</button>
           <button class="roll-btn ${aw('morale')}" ${dis} onclick="startRoll('${activeTurn.id}','morale')">Morale (+${s.mor})</button>
