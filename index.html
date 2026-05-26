@@ -35,6 +35,8 @@ let routQueue = [];
 let targetingMode = null;
 let activeTab = 'battle';
 let resultTimeout = null;
+let terrain = 'plain';
+let defenderSide = 'friendly'; // which side is defending for hill/river/settlement
 
 const FORT_TYPES = {
   castle:      { label:'Castle',      maxArmies:6 },
@@ -94,7 +96,7 @@ async function loadData() {
 async function saveData() {
   if (!dataLoaded) return;
   try {
-    await OBR.room.setMetadata({[`${ID}/data`]:{armies,fortifications,round,currentTurnIdx,routQueue,targetingMode}});
+    await OBR.room.setMetadata({[`${ID}/data`]:{armies,fortifications,round,currentTurnIdx,routQueue,targetingMode,terrain,defenderSide}});
     // Update name tags whenever data changes
     updateNameTags();
   } catch(e) { console.warn('saveData',e); }
@@ -387,6 +389,22 @@ function renderBattle() {
   html+=`<div class="round-bar"><span class="round-label">Round</span><button class="btn-round" onclick="changeRound(-1)">−</button><span class="round-num">${round}</span><button class="btn-round" onclick="changeRound(1)">+</button><button class="btn-next-turn" onclick="nextTurn()">Next ▶</button><button class="btn-end-round" onclick="endRound()">End Round</button></div>`;
   html+=`<button class="btn-secondary" style="margin-bottom:8px;width:100%" onclick="rollAllInitiative()">🎲 Roll All Initiative</button>`;
 
+  // Terrain selector
+  const tInfo = TERRAINS[terrain]||TERRAINS.plain;
+  html+=`<div style="background:#1a1a18;border-radius:6px;padding:8px 10px;margin-bottom:8px;border:0.5px solid #333">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      <label style="font-size:10px;color:#666;letter-spacing:1px">TERRAIN</label>
+      ${isGM?`<select style="flex:1;padding:3px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px" onchange="setTerrain(this.value)">
+        ${Object.entries(TERRAINS).map(([k,v])=>`<option value="${k}" ${terrain===k?'selected':''}>${v.label}</option>`).join('')}
+      </select>`:`<span style="font-size:12px;color:#D3D1C7">${tInfo.label}</span>`}
+      ${isGM?`<select style="padding:3px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:11px" onchange="setDefender(this.value)">
+        <option value="friendly" ${defenderSide==='friendly'?'selected':''}>Allied defends</option>
+        <option value="enemy" ${defenderSide==='enemy'?'selected':''}>Enemy defends</option>
+      </select>`:''}
+    </div>
+    <div style="font-size:10px;color:#666">${tInfo.desc}</div>
+  </div>`;
+
   if (sorted.length===0) { html+=`<div class="empty">No armies yet. Place tokens on the board and right-click them to set up army stat cards.</div>`; return html; }
 
   // Initiative list
@@ -592,6 +610,22 @@ window.executeRoll = async (attackerId,targetId,rollType) => {
   await resolveRoll(attackerId,targetId,rollType); targetingMode=null; await saveData(); render();
 };
 window.cancelTargeting = async () => { targetingMode=null; await saveData(); render(); };
+window.setTerrain = async (t) => {
+  terrain = t;
+  // Apply swamp mired conditions at battle start
+  if (t === 'swamp') {
+    for (const a of armies) {
+      a.conditions = a.conditions || {};
+      if (a.type === 'Cavalry') a.conditions.mired = Math.max(a.conditions.mired||0, 2);
+      else a.conditions.mired = Math.max(a.conditions.mired||0, 1);
+    }
+    OBR.notification.show('Swamp terrain: all armies gain Mired 1 (Cavalry Mired 2)', 'WARNING');
+  }
+  await saveData(); render();
+};
+
+window.setDefender = async (side) => { defenderSide = side; await saveData(); render(); };
+
 window.rollScout = async (armyId) => {
   const a=armies.find(x=>x.id===armyId); if(!a) return;
   const roll=Math.floor(Math.random()*20)+1;
@@ -638,12 +672,15 @@ async function resolveRoll(attackerId,targetId,rollType) {
     const isRanged = rollType.startsWith('ranged');
     const mapNum = parseInt(rollType.slice(-1))||0;
     const map = mapNum===0?0:mapNum===1?-5:-10;
-    modifier=(isRanged?as.rng:as.atk)+map; dc=ts.ac;
+    const terrainMod = getTerrainMods(atk, rollType);
+    const terrainAcMod = isRanged ? getTerrainAcMod(tgt) : 0;
+    modifier=(isRanged?as.rng:as.atk)+map+terrainMod; dc=ts.ac+terrainAcMod;
     label=isRanged?'Ranged':'Attack';
-    detail=`vs AC ${dc}${map!==0?` (MAP ${map})`:''}`;
+    const modParts=[map!==0?`MAP ${map}`:'', terrainMod!==0?`terrain ${terrainMod>0?'+':''}${terrainMod}`:'', terrainAcMod!==0?`tgt AC +${terrainAcMod}`:''].filter(Boolean).join(', ');
+    detail=`vs AC ${dc}${modParts?` (${modParts})`:''}`;
     if (isRanged) { if((atk.shots||0)<=0){showResult('No shots remaining!',null);return;} atk.shots=Math.max(0,(atk.shots||0)-1); }
-  } else if (rollType==='maneuver') { modifier=as.man; dc=ts.manDC; label='Maneuver'; detail=`vs MAN DC ${dc}`; }
-  else if (rollType==='morale') { modifier=as.mor; dc=ts.morDC; label='Morale'; detail=`vs MOR DC ${dc}`; }
+  } else if (rollType==='maneuver') { const tm=getTerrainMods(atk,'maneuver'); modifier=as.man+tm; dc=ts.manDC; label='Maneuver'; detail=`vs MAN DC ${dc}${tm!==0?` (terrain ${tm>0?'+':''}${tm})`:''}`;}
+  else if (rollType==='morale') { const tm=getTerrainMods(atk,'morale'); modifier=as.mor+tm; dc=ts.morDC; label='Morale'; detail=`vs MOR DC ${dc}${tm!==0?` (terrain ${tm>0?'+':''}${tm})`:''}`;}
   const total=roll+modifier; const degree=getDegree(roll,total,dc); let outcome='';
   if (rollType==='attack'||rollType==='ranged') {
     if (degree==='crit-success') { tgt.hp=Math.max(0,tgt.hp-2); outcome=`Crit Hit! ${tgt.name} −2 HP (${tgt.hp}/${tgt.maxHp})`; tgt.conditions=tgt.conditions||{}; if(Math.floor(Math.random()*20)+1<=10){tgt.conditions.shaken=Math.min(4,(tgt.conditions.shaken||0)+1);outcome+=` · Shaken ${tgt.conditions.shaken}`;} }
