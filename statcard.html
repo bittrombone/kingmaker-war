@@ -6,7 +6,7 @@
   <title>Army Stat Card</title>
   <link rel="stylesheet" href="style.css"/>
   <style>
-    body { padding: 0; }
+    body { padding: 0; margin: 0; }
     .card-wrap { padding: 10px; }
     .section-label { font-size: 10px; color: #666; letter-spacing: 0.05em; margin: 8px 0 4px; }
     .stat-edit-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 4px; margin-bottom: 8px; }
@@ -16,21 +16,18 @@
     .name-row { display: flex; gap: 6px; margin-bottom: 8px; }
     .name-row input { flex: 1; padding: 5px 8px; background: #111; border: 1px solid #333; border-radius: 4px; color: #D3D1C7; font-size: 14px; font-weight: 500; }
     .side-toggle { display: flex; border-radius: 4px; overflow: hidden; border: 1px solid #333; }
-    .side-btn { flex: 1; padding: 5px 8px; background: #1a1a18; color: #666; border: none; cursor: pointer; font-size: 11px; transition: all 0.15s; }
+    .side-btn { flex: 1; padding: 5px 8px; background: #1a1a18; color: #666; border: none; cursor: pointer; font-size: 11px; }
     .side-btn.active-friendly { background: #0d1e30; color: #378ADD; }
     .side-btn.active-enemy { background: #2a0d0d; color: #E24B4A; }
     .hp-edit-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
     .save-btn { width: 100%; padding: 8px; background: #EF9F27; color: #111; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 13px; margin-top: 4px; }
-    .save-btn:hover { background: #d4891f; }
-    .divider { border: none; border-top: 0.5px solid #333; margin: 8px 0; }
     .sc-tabs { display: flex; border-bottom: 1px solid #333; margin-bottom: 8px; }
     .sc-tab { flex: 1; padding: 6px; text-align: center; cursor: pointer; font-size: 11px; color: #666; border-bottom: 2px solid transparent; }
     .sc-tab.active { color: #EF9F27; border-bottom-color: #EF9F27; }
-    .gear-item { display: flex; align-items: center; justify-content: space-between; padding: 5px 6px; background: #1a1a18; border-radius: 4px; margin-bottom: 4px; font-size: 12px; }
+    .gear-item { display: flex; align-items: center; gap: 4px; padding: 5px 6px; background: #1a1a18; border-radius: 4px; margin-bottom: 4px; font-size: 12px; }
     .gear-name { color: #D3D1C7; flex: 1; }
-    .gear-bonus { font-size: 11px; color: #5DCAA5; margin-left: 6px; }
+    .gear-bonus { font-size: 11px; color: #5DCAA5; }
     .gear-remove { background: none; border: none; color: #666; cursor: pointer; font-size: 14px; padding: 0 2px; }
-    .gear-remove:hover { color: #E24B4A; }
     .gear-add-row { display: flex; gap: 4px; margin-top: 6px; }
     .gear-select { flex: 1; padding: 4px 6px; background: #111; border: 1px solid #333; border-radius: 3px; color: #D3D1C7; font-size: 11px; }
   </style>
@@ -39,23 +36,14 @@
 <div class="card-wrap" id="card">
   <div style="font-size:11px;color:#666;text-align:center;padding:20px">Loading...</div>
 </div>
-<script type="module">
-import OBR from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
-
-const ID = "com.kingmaker.war";
+<script>
+// No OBR dependency — communicates via postMessage to parent
 const params = new URLSearchParams(window.location.search);
 const armyId = params.get('armyId');
 const itemId  = params.get('itemId');
 
 let army = null;
-let armies = [];
 let scTab = 'stats';
-
-// Render immediately from URL data if available
-const dataParam = params.get('data');
-if (dataParam) {
-  try { army = JSON.parse(decodeURIComponent(dataParam)); renderCard(); } catch(e) {}
-}
 
 const CONDITIONS = [
   { key:'shaken',     label:'Shaken',     hasValue:true,  max:4 },
@@ -71,106 +59,73 @@ const CONDITIONS = [
 ];
 
 const GEAR_OPTIONS = [
-  { id:'magic_weapon_1',    label:'Magic Weapons',          bonus:'+1 ATK/RNG', atk:1,  rng:1,  ac:0 },
-  { id:'magic_weapon_2',    label:'Greater Magic Weapons',  bonus:'+2 ATK/RNG', atk:2,  rng:2,  ac:0 },
-  { id:'magic_weapon_3',    label:'Major Magic Weapons',    bonus:'+3 ATK/RNG', atk:3,  rng:3,  ac:0 },
-  { id:'magic_armor_1',     label:'Magic Armor',            bonus:'+1 AC',      atk:0,  rng:0,  ac:1 },
-  { id:'magic_armor_2',     label:'Greater Magic Armor',    bonus:'+2 AC',      atk:0,  rng:0,  ac:2 },
-  { id:'magic_armor_3',     label:'Major Magic Armor',      bonus:'+3 AC',      atk:0,  rng:0,  ac:3 },
-  { id:'additional_weapon', label:'Additional Weapon',      bonus:'Melee+Ranged', atk:0, rng:0, ac:0, special:'additional_weapon' },
-  { id:'healing_potions',   label:'Healing Potions (3)',    bonus:'3x heal 1 HP', atk:0, rng:0, ac:0, special:'healing_potions' },
+  { id:'magic_weapon_1',    label:'Magic Weapons',         bonus:'+1 ATK/RNG', atk:1, rng:1, ac:0 },
+  { id:'magic_weapon_2',    label:'Greater Magic Weapons', bonus:'+2 ATK/RNG', atk:2, rng:2, ac:0 },
+  { id:'magic_weapon_3',    label:'Major Magic Weapons',   bonus:'+3 ATK/RNG', atk:3, rng:3, ac:0 },
+  { id:'magic_armor_1',     label:'Magic Armor',           bonus:'+1 AC',      atk:0, rng:0, ac:1 },
+  { id:'magic_armor_2',     label:'Greater Magic Armor',   bonus:'+2 AC',      atk:0, rng:0, ac:2 },
+  { id:'magic_armor_3',     label:'Major Magic Armor',     bonus:'+3 AC',      atk:0, rng:0, ac:3 },
+  { id:'additional_weapon', label:'Additional Weapon',     bonus:'Melee+Ranged', atk:0, rng:0, ac:0, special:'additional_weapon' },
+  { id:'healing_potions',   label:'Healing Potions (3)',   bonus:'3x heal 1 HP', atk:0, rng:0, ac:0, special:'healing_potions' },
 ];
 
 function getGearBonuses(gear) {
   const b={atk:0,rng:0,ac:0};
-  for (const g of (gear||[])) {
-    const o=GEAR_OPTIONS.find(x=>x.id===g.id)||{};
-    b.atk+=(o.atk||0); b.rng+=(o.rng||0); b.ac+=(o.ac||0);
-  }
+  for (const g of (gear||[])) { const o=GEAR_OPTIONS.find(x=>x.id===g.id)||{}; b.atk+=(o.atk||0); b.rng+=(o.rng||0); b.ac+=(o.ac||0); }
   return b;
 }
 
-OBR.onReady(async () => {
-  // Refresh from live metadata
-  try {
-    const meta = await OBR.room.getMetadata();
-    const d = meta[`${ID}/data`];
-    if (d) {
-      armies = d.armies || [];
-      const fresh = armies.find(a => a.id === armyId);
-      if (fresh) { army = fresh; renderCard(); }
-    }
-  } catch(e) { console.warn('stat card load', e); }
+// Load from URL param immediately
+try {
+  const dataParam = params.get('data');
+  if (dataParam) { army = JSON.parse(decodeURIComponent(dataParam)); renderCard(); }
+} catch(e) {}
 
-  OBR.room.onMetadataChange((meta) => {
-    const d = meta[`${ID}/data`];
-    if (d) {
-      armies = d.armies || [];
-      const fresh = armies.find(a => a.id === armyId);
-      if (fresh) { army = fresh; renderCard(); }
-    }
-  });
+// Listen for updates from parent panel
+window.addEventListener('message', (event) => {
+  if (event.data?.type === 'ARMY_UPDATE' && event.data?.army?.id === armyId) {
+    army = event.data.army;
+    renderCard();
+  }
 });
 
-async function saveArmy() {
-  if (!army) return;
-  try {
-    const meta = await OBR.room.getMetadata();
-    const d = meta[`${ID}/data`] || {};
-    const arr = d.armies || [];
-    const idx = arr.findIndex(a => a.id === armyId);
-    if (idx >= 0) arr[idx] = army; else arr.push(army);
-    await OBR.room.setMetadata({ [`${ID}/data`]: { ...d, armies: arr } });
-    // Update token name and metadata
-    try {
-      await OBR.scene.items.updateItems([itemId], (items) => {
-        for (const i of items) {
-          i.name = army.name;
-          i.metadata[`${ID}/army`] = { id:army.id, friendly:army.friendly, ac:army.ac, man:army.man, mor:army.mor, sct:army.sct, atk:army.atk, rng:army.rng, maxHp:army.maxHp, rt:army.rt, maxShots:army.maxShots, shots:army.shots, hp:army.hp, conditions:army.conditions, gear:army.gear };
-        }
-      });
-    } catch(e) {}
-  } catch(e) { console.warn('saveArmy', e); }
+function sendToParent(type, payload) {
+  window.parent?.postMessage({ type, ...payload }, '*');
 }
 
 function renderCard() {
   const card = document.getElementById('card');
-  if (!army) { card.innerHTML=`<div style="font-size:11px;color:#666;text-align:center;padding:20px">Army not found</div>`; return; }
+  if (!army) { card.innerHTML=`<div style="font-size:11px;color:#666;text-align:center;padding:20px">Army not found.<br>Right-click token to open.</div>`; return; }
   const c = army.conditions || {};
   const gear = army.gear || [];
   const gb = getGearBonuses(gear);
-  const hpPct = army.maxHp > 0 ? (army.hp/army.maxHp)*100 : 0;
-  const hpColor = hpPct > 50 ? '#378ADD' : hpPct > 25 ? '#EF9F27' : '#E24B4A';
+  const hpPct = army.maxHp>0?(army.hp/army.maxHp)*100:0;
+  const hpColor = hpPct>50?'#378ADD':hpPct>25?'#EF9F27':'#E24B4A';
 
   let condBtns = '';
   for (const cond of CONDITIONS) {
-    const active = c[cond.key] ? 'active' : '';
-    const val = cond.hasValue && c[cond.key] > 0 ? `<span class="cond-value">${c[cond.key]}</span>` : '';
-    condBtns += `<button class="cond-btn ${active} ${cond.key}" onclick="toggleCond('${cond.key}')">${cond.label}${val}</button>`;
+    const active=c[cond.key]?'active':'';
+    const val=cond.hasValue&&c[cond.key]>0?`<span class="cond-value">${c[cond.key]}</span>`:'';
+    condBtns+=`<button class="cond-btn ${active} ${cond.key}" onclick="toggleCond('${cond.key}')">${cond.label}${val}</button>`;
   }
-
-  // Gear list
-  let gearHtml = gear.length === 0
-    ? `<div style="font-size:11px;color:#555;margin-bottom:6px">No gear equipped</div>`
-    : gear.map(g => {
-        const opt = GEAR_OPTIONS.find(o=>o.id===g.id);
-        if (!opt) return '';
-        let extra = '';
-        if (opt.special==='healing_potions') {
-          extra = `<span style="font-size:10px;color:#888;margin-right:4px">${g.charges||0} left</span><button class="rout-btn holds" style="padding:1px 6px;font-size:10px" onclick="usePotion('${g.uid}')">Use</button>`;
-        }
-        return `<div class="gear-item"><span class="gear-name">${opt.label}</span><span class="gear-bonus">${opt.bonus}</span>${extra}<button class="gear-remove" onclick="removeGear('${g.uid}')">✕</button></div>`;
-      }).join('');
-
-  const bonusSummary = Object.entries(gb).filter(([,v])=>v!==0).map(([k,v])=>`${k.toUpperCase()} ${v>0?'+':''}${v}`).join(' · ');
 
   const equippedIds = gear.map(g=>g.id);
   const availableGear = GEAR_OPTIONS.filter(o => {
     if (o.id.startsWith('magic_weapon') && equippedIds.some(id=>id.startsWith('magic_weapon'))) return false;
     if (o.id.startsWith('magic_armor')  && equippedIds.some(id=>id.startsWith('magic_armor')))  return false;
-    if (equippedIds.includes(o.id)) return false;
-    return true;
+    return !equippedIds.includes(o.id);
   });
+
+  const gearHtml = gear.length===0
+    ? `<div style="font-size:11px;color:#555;margin-bottom:6px">No gear equipped</div>`
+    : gear.map(g=>{
+        const opt=GEAR_OPTIONS.find(o=>o.id===g.id); if(!opt) return '';
+        let extra='';
+        if (opt.special==='healing_potions') extra=`<span style="font-size:10px;color:#888">${g.charges||0} left</span><button class="rout-btn holds" style="padding:1px 6px;font-size:10px;margin:0 2px" onclick="usePotion('${g.uid}')">Use</button>`;
+        return `<div class="gear-item"><span class="gear-name">${opt.label}</span><span class="gear-bonus">${opt.bonus}</span>${extra}<button class="gear-remove" onclick="removeGear('${g.uid}')">✕</button></div>`;
+      }).join('');
+
+  const bonusSummary = Object.entries(gb).filter(([,v])=>v!==0).map(([k,v])=>`${k.toUpperCase()} ${v>0?'+':''}${v}`).join(' · ');
 
   card.innerHTML = `
     <div class="name-row">
@@ -231,36 +186,35 @@ function renderCard() {
 window.setSide = (f) => { army.friendly=f; renderCard(); };
 window.setStat = (s,v) => { army[s]=parseInt(v)||0; if(s==='maxHp') army.hp=Math.min(army.hp,army.maxHp); };
 window.switchTab = (t) => { scTab=t; renderCard(); };
-window.changeHp = async (d) => { army.hp=Math.max(0,Math.min(army.maxHp,army.hp+d)); await saveArmy(); renderCard(); };
-window.toggleCond = async (k) => {
+window.changeHp = (d) => { army.hp=Math.max(0,Math.min(army.maxHp,army.hp+d)); renderCard(); };
+window.toggleCond = (k) => {
   army.conditions=army.conditions||{};
   const cond=CONDITIONS.find(c=>c.key===k);
   if (cond?.hasValue) { army.conditions[k]=((army.conditions[k]||0)+1)%(cond.max+1); if(!army.conditions[k]) delete army.conditions[k]; }
   else { if(army.conditions[k]) delete army.conditions[k]; else army.conditions[k]=true; }
   if (k==='shaken'&&(army.conditions.shaken||0)>=4) army.conditions.routed=true;
   if (k==='pinned'&&army.conditions.pinned) army.conditions.outflanked=true;
-  await saveArmy(); renderCard();
+  renderCard();
 };
-window.addGear = async () => {
+window.addGear = () => {
   const sel=document.getElementById('gear-picker'); if(!sel?.value) return;
   const opt=GEAR_OPTIONS.find(o=>o.id===sel.value); if(!opt) return;
   army.gear=army.gear||[];
   const entry={id:opt.id,uid:crypto.randomUUID()};
-  if (opt.special==='healing_potions') entry.charges=3;
+  if(opt.special==='healing_potions') entry.charges=3;
   army.gear.push(entry);
-  await saveArmy(); renderCard();
+  renderCard();
 };
-window.removeGear = async (uid) => { army.gear=(army.gear||[]).filter(g=>g.uid!==uid); await saveArmy(); renderCard(); };
-window.usePotion = async (uid) => {
+window.removeGear = (uid) => { army.gear=(army.gear||[]).filter(g=>g.uid!==uid); renderCard(); };
+window.usePotion = (uid) => {
   const g=(army.gear||[]).find(x=>x.uid===uid); if(!g||(g.charges||0)<=0) return;
   g.charges--; army.hp=Math.min(army.maxHp,army.hp+1);
   if(g.charges===0) army.gear=army.gear.filter(x=>x.uid!==uid);
-  await saveArmy(); renderCard();
+  renderCard();
 };
-window.doSave = async () => {
+window.doSave = () => {
   army.name=document.getElementById('army-name')?.value?.trim()||army.name;
-  await saveArmy();
-  try { OBR.notification.show(`${army.name} saved`,'INFO'); } catch(e){}
+  sendToParent('SAVE_ARMY', { army, itemId });
 };
 </script>
 </body>
