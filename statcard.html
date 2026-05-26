@@ -58,21 +58,10 @@ const CONDITIONS = [
   { key:'engaged',    label:'Engaged',    hasValue:false },
 ];
 
-const GEAR_OPTIONS = [
-  { id:'magic_weapon_1',    label:'Magic Weapons',         bonus:'+1 ATK/RNG', atk:1, rng:1, ac:0 },
-  { id:'magic_weapon_2',    label:'Greater Magic Weapons', bonus:'+2 ATK/RNG', atk:2, rng:2, ac:0 },
-  { id:'magic_weapon_3',    label:'Major Magic Weapons',   bonus:'+3 ATK/RNG', atk:3, rng:3, ac:0 },
-  { id:'magic_armor_1',     label:'Magic Armor',           bonus:'+1 AC',      atk:0, rng:0, ac:1 },
-  { id:'magic_armor_2',     label:'Greater Magic Armor',   bonus:'+2 AC',      atk:0, rng:0, ac:2 },
-  { id:'magic_armor_3',     label:'Major Magic Armor',     bonus:'+3 AC',      atk:0, rng:0, ac:3 },
-  { id:'additional_weapon', label:'Additional Weapon',     bonus:'Melee+Ranged', atk:0, rng:0, ac:0, special:'additional_weapon' },
-  { id:'healing_potions',   label:'Healing Potions (3)',   bonus:'3x heal 1 HP', atk:0, rng:0, ac:0, special:'healing_potions' },
-];
-
+// Gear is stored as: army.gear = { armor:0, melee:0, ranged:0, potions:0, additional:false }
 function getGearBonuses(gear) {
-  const b={atk:0,rng:0,ac:0};
-  for (const g of (gear||[])) { const o=GEAR_OPTIONS.find(x=>x.id===g.id)||{}; b.atk+=(o.atk||0); b.rng+=(o.rng||0); b.ac+=(o.ac||0); }
-  return b;
+  const g = gear || {};
+  return { ac: g.armor||0, atk: g.melee||0, rng: g.ranged||0 };
 }
 
 // Load from URL param immediately
@@ -97,7 +86,7 @@ function renderCard() {
   const card = document.getElementById('card');
   if (!army) { card.innerHTML=`<div style="font-size:11px;color:#666;text-align:center;padding:20px">Army not found.<br>Right-click token to open.</div>`; return; }
   const c = army.conditions || {};
-  const gear = army.gear || [];
+  const gear = army.gear || {};
   const gb = getGearBonuses(gear);
   const hpPct = army.maxHp>0?(army.hp/army.maxHp)*100:0;
   const hpColor = hpPct>50?'#378ADD':hpPct>25?'#EF9F27':'#E24B4A';
@@ -109,23 +98,11 @@ function renderCard() {
     condBtns+=`<button class="cond-btn ${active} ${cond.key}" onclick="toggleCond('${cond.key}')">${cond.label}${val}</button>`;
   }
 
-  const equippedIds = gear.map(g=>g.id);
-  const availableGear = GEAR_OPTIONS.filter(o => {
-    if (o.id.startsWith('magic_weapon') && equippedIds.some(id=>id.startsWith('magic_weapon'))) return false;
-    if (o.id.startsWith('magic_armor')  && equippedIds.some(id=>id.startsWith('magic_armor')))  return false;
-    return !equippedIds.includes(o.id);
-  });
-
-  const gearHtml = gear.length===0
-    ? `<div style="font-size:11px;color:#555;margin-bottom:6px">No gear equipped</div>`
-    : gear.map(g=>{
-        const opt=GEAR_OPTIONS.find(o=>o.id===g.id); if(!opt) return '';
-        let extra='';
-        if (opt.special==='healing_potions') extra=`<span style="font-size:10px;color:#888">${g.charges||0} left</span><button class="rout-btn holds" style="padding:1px 6px;font-size:10px;margin:0 2px" onclick="usePotion('${g.uid}')">Use</button>`;
-        return `<div class="gear-item"><span class="gear-name">${opt.label}</span><span class="gear-bonus">${opt.bonus}</span>${extra}<button class="gear-remove" onclick="removeGear('${g.uid}')">✕</button></div>`;
-      }).join('');
-
-  const bonusSummary = Object.entries(gb).filter(([,v])=>v!==0).map(([k,v])=>`${k.toUpperCase()} ${v>0?'+':''}${v}`).join(' · ');
+  const bonusSummary = [
+    gb.ac  ? `AC +${gb.ac}`  : '',
+    gb.atk ? `ATK +${gb.atk}` : '',
+    gb.rng ? `RNG +${gb.rng}` : '',
+  ].filter(Boolean).join(' · ');
 
   card.innerHTML = `
     <div class="name-row">
@@ -164,18 +141,48 @@ function renderCard() {
       </div>
     `:''}
     ${scTab==='gear'?`
-      <div>
-        ${gearHtml}
-        ${bonusSummary?`<div style="font-size:10px;color:#5DCAA5;margin-bottom:6px">Bonuses: ${bonusSummary}</div>`:''}
-        ${availableGear.length>0?`
-          <div class="gear-add-row">
-            <select class="gear-select" id="gear-picker">
-              <option value="">— add gear —</option>
-              ${availableGear.map(o=>`<option value="${o.id}">${o.label} (${o.bonus})</option>`).join('')}
-            </select>
-            <button class="rout-btn holds" style="padding:4px 10px" onclick="addGear()">Add</button>
-          </div>`
-        :`<div style="font-size:11px;color:#555">All slots filled</div>`}
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${bonusSummary?`<div style="font-size:10px;color:#5DCAA5">Bonuses: ${bonusSummary}</div>`:''}
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <label style="font-size:12px;color:#D3D1C7">Magic Armor</label>
+          <div style="display:flex;align-items:center;gap:6px">
+            <button class="hp-btn" onclick="setGear('armor',Math.max(0,(army.gear?.armor||0)-1))">−</button>
+            <span style="font-size:14px;font-weight:600;min-width:20px;text-align:center;color:#5DCAA5">${gear.armor||0}</span>
+            <button class="hp-btn" onclick="setGear('armor',Math.min(4,(army.gear?.armor||0)+1))">+</button>
+            <span style="font-size:10px;color:#666">→ +${gear.armor||0} AC</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <label style="font-size:12px;color:#D3D1C7">Magic Melee</label>
+          <div style="display:flex;align-items:center;gap:6px">
+            <button class="hp-btn" onclick="setGear('melee',Math.max(0,(army.gear?.melee||0)-1))">−</button>
+            <span style="font-size:14px;font-weight:600;min-width:20px;text-align:center;color:#5DCAA5">${gear.melee||0}</span>
+            <button class="hp-btn" onclick="setGear('melee',Math.min(4,(army.gear?.melee||0)+1))">+</button>
+            <span style="font-size:10px;color:#666">→ +${gear.melee||0} ATK</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <label style="font-size:12px;color:#D3D1C7">Magic Ranged</label>
+          <div style="display:flex;align-items:center;gap:6px">
+            <button class="hp-btn" onclick="setGear('ranged',Math.max(0,(army.gear?.ranged||0)-1))">−</button>
+            <span style="font-size:14px;font-weight:600;min-width:20px;text-align:center;color:#5DCAA5">${gear.ranged||0}</span>
+            <button class="hp-btn" onclick="setGear('ranged',Math.min(4,(army.gear?.ranged||0)+1))">+</button>
+            <span style="font-size:10px;color:#666">→ +${gear.ranged||0} RNG</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <label style="font-size:12px;color:#D3D1C7">Healing Potions</label>
+          <div style="display:flex;align-items:center;gap:6px">
+            <button class="hp-btn" onclick="setGear('potions',Math.max(0,(army.gear?.potions||0)-1))">−</button>
+            <span style="font-size:14px;font-weight:600;min-width:20px;text-align:center;color:#5DCAA5">${gear.potions||0}</span>
+            <button class="hp-btn" onclick="setGear('potions',Math.min(4,(army.gear?.potions||0)+1))">+</button>
+            <button class="rout-btn holds" style="padding:2px 8px;font-size:11px" onclick="usePotion()">Use (heal 1)</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <label style="font-size:12px;color:#D3D1C7">Additional Weapon</label>
+          <input type="checkbox" ${gear.additional?'checked':''} onchange="setGear('additional',this.checked)" style="width:18px;height:18px;cursor:pointer"/>
+        </div>
       </div>
     `:''}
     ${scTab==='conds'?`<div class="conds-grid" style="margin-bottom:8px">${condBtns}</div>`:''}
@@ -196,20 +203,15 @@ window.toggleCond = (k) => {
   if (k==='pinned'&&army.conditions.pinned) army.conditions.outflanked=true;
   renderCard();
 };
-window.addGear = () => {
-  const sel=document.getElementById('gear-picker'); if(!sel?.value) return;
-  const opt=GEAR_OPTIONS.find(o=>o.id===sel.value); if(!opt) return;
-  army.gear=army.gear||[];
-  const entry={id:opt.id,uid:crypto.randomUUID()};
-  if(opt.special==='healing_potions') entry.charges=3;
-  army.gear.push(entry);
+window.setGear = (key, val) => {
+  army.gear = army.gear || {};
+  army.gear[key] = val;
   renderCard();
 };
-window.removeGear = (uid) => { army.gear=(army.gear||[]).filter(g=>g.uid!==uid); renderCard(); };
-window.usePotion = (uid) => {
-  const g=(army.gear||[]).find(x=>x.uid===uid); if(!g||(g.charges||0)<=0) return;
-  g.charges--; army.hp=Math.min(army.maxHp,army.hp+1);
-  if(g.charges===0) army.gear=army.gear.filter(x=>x.uid!==uid);
+window.usePotion = () => {
+  if (!(army.gear?.potions > 0)) return;
+  army.gear.potions--;
+  army.hp = Math.min(army.maxHp, army.hp + 1);
   renderCard();
 };
 window.doSave = () => {

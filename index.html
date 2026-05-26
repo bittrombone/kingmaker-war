@@ -59,14 +59,8 @@ const CONDITIONS = [
 ];
 
 function getGearBonuses(gear) {
-  const GEAR = {
-    magic_weapon_1:{atk:1,rng:1,ac:0}, magic_weapon_2:{atk:2,rng:2,ac:0}, magic_weapon_3:{atk:3,rng:3,ac:0},
-    magic_armor_1:{atk:0,rng:0,ac:1}, magic_armor_2:{atk:0,rng:0,ac:2}, magic_armor_3:{atk:0,rng:0,ac:3},
-    additional_weapon:{atk:0,rng:0,ac:0}, healing_potions:{atk:0,rng:0,ac:0},
-  };
-  const b={atk:0,rng:0,ac:0};
-  for (const g of (gear||[])) { const o=GEAR[g.id]||{}; b.atk+=(o.atk||0); b.rng+=(o.rng||0); b.ac+=(o.ac||0); }
-  return b;
+  const g = gear || {};
+  return { ac: g.armor||0, atk: g.melee||0, rng: g.ranged||0 };
 }
 
 function getModifiedStats(army) {
@@ -184,13 +178,23 @@ async function syncArmiesFromTokens() {
           maxShots: meta.maxShots||0, shots: meta.shots||0,
           hp: meta.hp||meta.maxHp||4,
           conditions: meta.conditions||{},
+          gear: meta.gear||[],
           tokenId: i.id,
         };
       });
     // Merge: keep existing data, add new tokens
+    // Also merge gear from token metadata into existing armies
     const existingIds = armies.map(a=>a.id);
     for (const ta of tokenArmies) {
-      if (!existingIds.includes(ta.id)) armies.push(ta);
+      if (!existingIds.includes(ta.id)) {
+        armies.push(ta);
+      } else {
+        // Merge gear from token if existing army has none
+        const existing = armies.find(a=>a.id===ta.id);
+        if (existing && !existing.gear?.length && ta.gear?.length) {
+          existing.gear = ta.gear;
+        }
+      }
     }
     // Remove armies whose tokens no longer exist
     const tokenIds = items.map(i=>i.id);
@@ -280,10 +284,18 @@ OBR.onReady(async () => {
           maxShots: meta.maxShots||0, shots: meta.shots||0,
           hp: meta.hp||meta.maxHp||4,
           conditions: meta.conditions||{},
+          gear: meta.gear||[],
           tokenId: item.id,
         };
         armies.push(army);
         await saveData();
+      }
+      // Always sync gear from room metadata — token metadata may lag
+      const roomMeta = await OBR.room.getMetadata();
+      const roomData = roomMeta[`${ID}/data`];
+      if (roomData?.armies) {
+        const roomArmy = roomData.armies.find(a=>a.id===army.id);
+        if (roomArmy) army = roomArmy; // use room version which has latest gear
       }
       // Open popover anchored to token element
       const armyParam = encodeURIComponent(JSON.stringify(army));
