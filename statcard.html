@@ -148,7 +148,7 @@ function renderCard() {
           <div style="display:flex;align-items:center;gap:6px">
             <button class="hp-btn" onclick="setGear('armor',Math.max(0,(army.gear?.armor||0)-1))">−</button>
             <span style="font-size:14px;font-weight:600;min-width:20px;text-align:center;color:#5DCAA5">${gear.armor||0}</span>
-            <button class="hp-btn" onclick="setGear('armor',Math.min(4,(army.gear?.armor||0)+1))">+</button>
+            <button class="hp-btn" onclick="setGear('armor',Math.min(3,(army.gear?.armor||0)+1))">+</button>
             <span style="font-size:10px;color:#666">→ +${gear.armor||0} AC</span>
           </div>
         </div>
@@ -157,7 +157,7 @@ function renderCard() {
           <div style="display:flex;align-items:center;gap:6px">
             <button class="hp-btn" onclick="setGear('melee',Math.max(0,(army.gear?.melee||0)-1))">−</button>
             <span style="font-size:14px;font-weight:600;min-width:20px;text-align:center;color:#5DCAA5">${gear.melee||0}</span>
-            <button class="hp-btn" onclick="setGear('melee',Math.min(4,(army.gear?.melee||0)+1))">+</button>
+            <button class="hp-btn" onclick="setGear('melee',Math.min(3,(army.gear?.melee||0)+1))">+</button>
             <span style="font-size:10px;color:#666">→ +${gear.melee||0} ATK</span>
           </div>
         </div>
@@ -166,7 +166,7 @@ function renderCard() {
           <div style="display:flex;align-items:center;gap:6px">
             <button class="hp-btn" onclick="setGear('ranged',Math.max(0,(army.gear?.ranged||0)-1))">−</button>
             <span style="font-size:14px;font-weight:600;min-width:20px;text-align:center;color:#5DCAA5">${gear.ranged||0}</span>
-            <button class="hp-btn" onclick="setGear('ranged',Math.min(4,(army.gear?.ranged||0)+1))">+</button>
+            <button class="hp-btn" onclick="setGear('ranged',Math.min(3,(army.gear?.ranged||0)+1))">+</button>
             <span style="font-size:10px;color:#666">→ +${gear.ranged||0} RNG</span>
           </div>
         </div>
@@ -175,7 +175,7 @@ function renderCard() {
           <div style="display:flex;align-items:center;gap:6px">
             <button class="hp-btn" onclick="setGear('potions',Math.max(0,(army.gear?.potions||0)-1))">−</button>
             <span style="font-size:14px;font-weight:600;min-width:20px;text-align:center;color:#5DCAA5">${gear.potions||0}</span>
-            <button class="hp-btn" onclick="setGear('potions',Math.min(4,(army.gear?.potions||0)+1))">+</button>
+            <button class="hp-btn" onclick="setGear('potions',Math.min(3,(army.gear?.potions||0)+1))">+</button>
             <button class="rout-btn holds" style="padding:2px 8px;font-size:11px" onclick="usePotion()">Use (heal 1)</button>
           </div>
         </div>
