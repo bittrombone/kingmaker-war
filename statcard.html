@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Army Stat Card</title>
   <link rel="stylesheet" href="style.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/dist/browser/index.umd.js"></script>
   <style>
     body { padding: 0; }
     .card-wrap { padding: 10px; }
@@ -40,8 +41,8 @@
   <div style="font-size:11px;color:#666;text-align:center;padding:20px">Loading...</div>
 </div>
 <script>
-(async function() {
-const { default: OBR } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
+(function() {
+const OBR = window.OBR;
 const ID = "com.kingmaker.war";
 
 const params = new URLSearchParams(window.location.search);

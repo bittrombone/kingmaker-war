@@ -2,52 +2,11 @@
 <html>
 <head><title>Kingmaker War Background</title></head>
 <body>
-<script>
-(async function() {
-const { default: OBR } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
-
-const ID = "com.kingmaker.war";
-
-OBR.onReady(async () => {
-  // Listen for item clicks when in targeting mode
-  OBR.scene.items.onChange(async (items) => {
-    // Sync token metadata changes back to room for the main panel
-    const roomMeta = await OBR.room.getMetadata();
-    const warData = roomMeta[`${ID}/data`] || {};
-    
-    // Update army HP bars if battle board data changed
-    for (const item of items) {
-      const meta = item.metadata[`${ID}/army`];
-      if (meta) {
-        // Army token — check if HP changed and update label
-        const hpText = `${meta.hp}/${meta.maxHp}`;
-        if (item.text?.plainText !== hpText) {
-          // HP label sync handled by main panel
-        }
-      }
-    }
-  });
-
-  // Handle context menu toggle friendly
-  OBR.contextMenu.onClick(async (context) => {
-    if (context.id === `${ID}/toggle-friendly`) {
-      for (const item of context.items) {
-        const meta = item.metadata[`${ID}/army`] || {};
-        const isFriendly = !meta.friendly;
-        await OBR.scene.items.updateItems([item], (items) => {
-          for (const i of items) {
-            i.metadata[`${ID}/army`] = { ...meta, friendly: isFriendly };
-          }
-        });
-        await OBR.notification.show(
-          `${item.name} marked as ${isFriendly ? "friendly" : "enemy"}`,
-          "INFO"
-        );
-      }
-    }
-  });
+<script type="module">
+import OBR from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
+OBR.onReady(() => {
+  console.log("Kingmaker War background ready");
 });
-})();
 </script>
 </body>
 </html>

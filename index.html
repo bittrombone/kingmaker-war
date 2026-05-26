@@ -112,6 +112,8 @@ const NAME_TAG_KEY = `${ID}/nametag`;
 async function updateNameTags() {
   if (!dataLoaded) return;
   try {
+    const isReady = await OBR.scene.isReady();
+    if (!isReady) return;
     const sorted = [...armies].sort((a,b)=>(b.initiative||0)-(a.initiative||0));
     const activeTurn = sorted[currentTurnIdx];
     const items = await OBR.scene.items.getItems();
