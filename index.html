@@ -38,6 +38,60 @@ let resultTimeout = null;
 let terrain = 'plain';
 let defenderSide = 'friendly'; // which side is defending for hill/river/settlement
 
+const TERRAINS = {
+  plain:      { label:'Plain',      desc:'No modifiers. Cavalry +1 to strikes.' },
+  hill:       { label:'Hill',       desc:'Defenders +2 AC vs ranged. Attackers −2 Maneuver advancing.' },
+  forest:     { label:'Forest',     desc:'All ranged −2. Cavalry −2 Maneuver.' },
+  swamp:      { label:'Swamp',      desc:'All armies Mired 1. Cavalry Mired 2.' },
+  mountain:   { label:'Mountain',   desc:'All armies −4 Maneuver. Siege cannot deploy.' },
+  river:      { label:'River',      desc:'Attackers Mired 1 round 1. Defenders +2 ranged round 1.' },
+  lake:       { label:'Lake',       desc:'No battle possible.' },
+  ruin:       { label:'Ruin',       desc:'All armies −2 Maneuver. All ranged −1.' },
+  settlement: { label:'Settlement', desc:'All defending armies +1 to all checks.' },
+};
+
+function getTerrainMods(army, rollType) {
+  const isDefender = army.friendly === (defenderSide === 'friendly');
+  const isAttacker = !isDefender;
+  const isRanged   = rollType && rollType.startsWith('ranged');
+  const isManeuver = rollType === 'maneuver';
+  const isMelee    = rollType && rollType.startsWith('attack');
+  let bonus = 0;
+  switch(terrain) {
+    case 'plain':
+      if ((isMelee||isRanged) && army.type==='Cavalry') bonus += 1;
+      break;
+    case 'hill':
+      if (isAttacker && isManeuver) bonus -= 2;
+      break;
+    case 'forest':
+      if (isRanged) bonus -= 2;
+      if (isManeuver && army.type==='Cavalry') bonus -= 2;
+      break;
+    case 'mountain':
+      if (isManeuver) bonus -= 4;
+      break;
+    case 'river':
+      if (isAttacker && isManeuver && round===1) bonus -= 2;
+      if (isDefender && isRanged && round===1) bonus += 2;
+      break;
+    case 'ruin':
+      if (isManeuver) bonus -= 2;
+      if (isRanged) bonus -= 1;
+      break;
+    case 'settlement':
+      if (isDefender) bonus += 1;
+      break;
+  }
+  return bonus;
+}
+
+function getTerrainAcMod(targetArmy) {
+  const isDefender = targetArmy.friendly === (defenderSide === 'friendly');
+  if (terrain === 'hill' && isDefender) return 2;
+  return 0;
+}
+
 const FORT_TYPES = {
   castle:      { label:'Castle',      maxArmies:6 },
   keep:        { label:'Keep',        maxArmies:4 },
@@ -328,14 +382,13 @@ OBR.onReady(async () => {
         const roomArmy = roomData.armies.find(a=>a.id===army.id);
         if (roomArmy) army = roomArmy; // use room version which has latest gear
       }
-      // Open popover anchored to token element
+      // Open popover
       const armyParam = encodeURIComponent(JSON.stringify(army));
       await OBR.popover.open({
         id: `${ID}/popover`,
         url: `${BASE_URL}/statcard.html?armyId=${army.id}&itemId=${item.id}&data=${armyParam}`,
         height: 480,
         width: 300,
-        anchorElementId: elementId,
       });
     }
   });
