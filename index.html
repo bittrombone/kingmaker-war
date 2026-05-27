@@ -255,6 +255,21 @@ async function syncArmiesFromTokens() {
     // Remove armies whose tokens no longer exist
     const tokenIds = items.map(i=>i.id);
     armies = armies.filter(a => !a.tokenId || tokenIds.includes(a.tokenId));
+
+    // Sync fortifications from PROP layer tokens
+    const propItems = items.filter(i => i.layer==='PROP' && i.metadata[`${ID}/fort`]);
+    for (const pi of propItems) {
+      const meta = pi.metadata[`${ID}/fort`];
+      if (!fortifications.find(f=>f.id===meta.id)) {
+        fortifications.push({
+          id: meta.id, name: pi.name||'Fortification',
+          type: meta.type||'keep', ac: meta.ac||25,
+          maxHp: meta.maxHp||5, hp: meta.hp||meta.maxHp||5,
+          tokenId: pi.id,
+        });
+      }
+    }
+    fortifications = fortifications.filter(f => !f.tokenId || tokenIds.includes(f.tokenId));
   } catch(e) { console.warn('syncArmies',e); }
 }
 
@@ -310,6 +325,26 @@ OBR.onReady(async () => {
   // Poll localStorage for saves from statcard popover (fallback for sandboxed iframes)
   setInterval(async () => {
     try {
+      // Check for fort saves too
+      const rawFort = localStorage.getItem('KW_SAVE_FORT');
+      if (rawFort) {
+        try {
+          const fd = JSON.parse(rawFort);
+          if (fd.ts && Date.now() - fd.ts <= 5000) {
+            localStorage.removeItem('KW_SAVE_FORT');
+            const uf = fd.fort; const fItemId = fd.itemId;
+            if (uf) {
+              const fi = fortifications.findIndex(f=>f.id===uf.id);
+              if (fi>=0) fortifications[fi]=uf; else fortifications.push(uf);
+              if (fItemId) {
+                try { await OBR.scene.items.updateItems([fItemId],(items)=>{ for(const i of items){i.name=uf.name;i.metadata[`${ID}/fort`]={id:uf.id,ac:uf.ac,maxHp:uf.maxHp,hp:uf.hp,type:uf.type};} }); } catch(e) {}
+              }
+              await saveData(); render();
+              OBR.notification.show(`${uf.name} saved`,'INFO');
+            }
+          } else { localStorage.removeItem('KW_SAVE_FORT'); }
+        } catch(e) {}
+      }
       const raw = localStorage.getItem('KW_SAVE_ARMY');
       if (!raw) return;
       const data = JSON.parse(raw);
@@ -392,6 +427,39 @@ OBR.onReady(async () => {
       });
     }
   });
+
+  // Fort context menu
+  OBR.contextMenu.create({
+    id: `${ID}/fortcard`,
+    icons: [{
+      icon: `${BASE_URL}/icon.svg`,
+      label: 'Fortification Card',
+      filter: { every: [{ key:'layer', value:'PROP', operator:'==' }] },
+    }],
+    async onClick(context) {
+      const item = context.items[0]; if (!item) return;
+      try { const m=await OBR.room.getMetadata(); const d=m[`${ID}/data`]; if(d){fortifications=d.fortifications||[];} } catch(e) {}
+      let fort = fortifications.find(f=>f.tokenId===item.id);
+      if (!fort) {
+        fort = {
+          id: crypto.randomUUID(),
+          name: item.name||'Fortification',
+          type: 'keep',
+          ac: 25, maxHp: 5, hp: 5,
+          tokenId: item.id,
+        };
+        fortifications.push(fort);
+        await saveData();
+      }
+      const fortParam = encodeURIComponent(JSON.stringify(fort));
+      await OBR.popover.open({
+        id: `${ID}/fortpopover`,
+        url: `${BASE_URL}/fortcard.html?fortId=${fort.id}&itemId=${item.id}&data=${fortParam}`,
+        height: 360,
+        width: 280,
+      });
+    }
+  });
 });
 
 // ─── Tabs ─────────────────────────────────────────────────────────
@@ -424,6 +492,15 @@ function renderBattle() {
       const label=isGM||t.friendly?t.name:'???';
       const hp=isGM||t.friendly?` (${t.hp}/${t.maxHp} HP)`:'';
       html+=`<div class="rout-army"><span class="rout-army-name">${label}${hp}</span><button class="rout-btn holds" onclick="executeRoll('${targetingMode.armyId}','${t.id}','${targetingMode.rollType}')">Target</button></div>`;
+    }
+    // Siege armies can also target fortifications
+    const atkArmy = armies.find(a=>a.id===targetingMode.armyId);
+    if (atkArmy?.type==='Siege' && (targetingMode.rollType.startsWith('ranged')||targetingMode.rollType.startsWith('attack')) && fortifications.length>0) {
+      html+=`<div style="font-size:10px;color:#9F8FEF;margin:6px 0 3px;letter-spacing:1px">FORTIFICATIONS</div>`;
+      for (const f of fortifications) {
+        if (f.hp<=0) continue;
+        html+=`<div class="rout-army"><span class="rout-army-name" style="color:#9F8FEF">🏰 ${f.name} (HP ${f.hp}/${f.maxHp} · AC ${f.ac})</span><button class="rout-btn" style="background:#1a1535;color:#9F8FEF;border:1px solid #7F77DD" onclick="attackFort('${targetingMode.armyId}','${f.id}','${targetingMode.rollType}')">Siege</button></div>`;
+      }
     }
     html+=`<button class="btn-secondary" style="margin-top:6px;width:100%" onclick="cancelTargeting()">Cancel</button></div>`;
   }
@@ -484,7 +561,7 @@ function renderBattle() {
     const s=getModifiedStats(activeTurn);
     const dis=targetingMode?'disabled':'';
     const aw=(rt)=>targetingMode?.armyId===activeTurn.id&&targetingMode?.rollType===rt?'awaiting-target':'';
-    const hasRanged=activeTurn.maxShots>0;
+    const hasRanged=activeTurn.rng>0||activeTurn.maxShots>0;
     html+=`<div class="army-card" style="margin-top:8px">
       <div class="army-card-header ${activeTurn.friendly?'friendly':'enemy'}">
         <span class="army-title">${activeTurn.name}</span>
@@ -498,9 +575,9 @@ function renderBattle() {
             <button class="roll-btn ${aw('attack2')}" ${dis} onclick="startRoll('${activeTurn.id}','attack2')" style="opacity:0.6">Strike 3 (+${s.atk-10})</button>
           `:''}
           ${hasRanged?`
-            <button class="roll-btn ${aw('ranged0')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged0')">Ranged (+${s.rng}) [${activeTurn.shots||0}]</button>
-            <button class="roll-btn ${aw('ranged1')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged1')" style="opacity:0.8">Ranged 2 (+${s.rng-5}) [${activeTurn.shots||0}]</button>
-            <button class="roll-btn ${aw('ranged2')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged2')" style="opacity:0.6">Ranged 3 (+${s.rng-10}) [${activeTurn.shots||0}]</button>
+            <button class="roll-btn ${aw('ranged0')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged0')">Ranged (+${s.rng})${activeTurn.maxShots>0?` [${activeTurn.shots||0}/${activeTurn.maxShots}]`:''}</button>
+            <button class="roll-btn ${aw('ranged1')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged1')" style="opacity:0.8">Ranged 2 (+${s.rng-5})${activeTurn.maxShots>0?` [${activeTurn.shots||0}/${activeTurn.maxShots}]`:''}</button>
+            <button class="roll-btn ${aw('ranged2')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged2')" style="opacity:0.6">Ranged 3 (+${s.rng-10})${activeTurn.maxShots>0?` [${activeTurn.shots||0}/${activeTurn.maxShots}]`:''}</button>
           `:''}
           <button class="roll-btn ${aw('maneuver')}" ${dis} onclick="startRoll('${activeTurn.id}','maneuver')">Maneuver (+${s.man})</button>
           <button class="roll-btn ${aw('morale')}" ${dis} onclick="startRoll('${activeTurn.id}','morale')">Morale (+${s.mor})</button>
@@ -570,43 +647,39 @@ function renderArmies() {
 
 // ─── Forts ────────────────────────────────────────────────────────
 function renderForts() {
-  let html='';
-  if (isGM) {
-    html+=`<div class="add-army-form" style="margin-bottom:10px">
-      <div style="font-size:12px;font-weight:500;color:#888;margin-bottom:8px;letter-spacing:1px">ADD FORTIFICATION</div>
-      <div style="display:flex;gap:6px;margin-bottom:6px">
-        <input class="form-input" id="fort-name" type="text" placeholder="Fort name" style="flex:1"/>
-        <select class="select-input" id="fort-type" style="flex:1">
-          ${Object.entries(FORT_TYPES).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
-        </select>
-      </div>
-      <button class="btn-add" onclick="addFort()">Add Fortification</button>
-    </div>`;
+  let html = '';
+  if (fortifications.length===0) {
+    html+=`<div class="empty">No fortifications.<br>Place a fortification prop on the board and right-click it to set it up.</div>`;
+    return html;
   }
-  if (fortifications.length===0) { html+=`<div class="empty">No fortifications.</div>`; return html; }
   for (const f of fortifications) {
-    const garrisoned=f.garrisonedArmies||[];
-    const garrisonedNames=garrisoned.map(id=>armies.find(a=>a.id===id)?.name||'Unknown').join(', ');
-    const slots=f.maxArmies-garrisoned.length;
+    const hpPct = f.maxHp>0?(f.hp/f.maxHp)*100:0;
+    const hpColor = hpPct>50?'#7F77DD':hpPct>25?'#EF9F27':'#E24B4A';
+    const damaged = f.hp<=Math.floor(f.maxHp/2)&&f.hp>0;
+    const destroyed = f.hp===0;
     html+=`<div class="army-card" style="border-left:2px solid #7F77DD">
       <div class="army-card-header" style="border-top:2px solid #7F77DD;background:#1a1535">
         <span class="army-title">🏰 ${f.name}</span>
         <span style="font-size:10px;color:#9F8FEF">${FORT_TYPES[f.type]?.label||f.type}</span>
-        <span style="font-size:10px;color:#666;margin-left:auto">${garrisoned.length}/${f.maxArmies}</span>
-        ${isGM?`<button style="font-size:10px;padding:2px 6px;background:#333;border:1px solid #555;border-radius:3px;color:#888;cursor:pointer;margin-left:6px" onclick="deleteFort('${f.id}')">✕</button>`:''}
+        ${damaged?`<span style="font-size:10px;color:#EF9F27;margin-left:4px">⚠ Damaged</span>`:''}
+        ${destroyed?`<span style="font-size:10px;color:#E24B4A;margin-left:4px">✕ Destroyed</span>`:''}
+        ${isGM?`<button style="font-size:10px;padding:2px 6px;background:#333;border:1px solid #555;border-radius:3px;color:#888;cursor:pointer;margin-left:auto" onclick="deleteFort('${f.id}')">✕</button>`:''}
       </div>
       <div class="army-card-body">
-        ${garrisoned.length>0?`<div style="font-size:11px;color:#888;margin-bottom:8px">Garrisoned: ${garrisonedNames}</div>`:'<div style="font-size:11px;color:#555;margin-bottom:8px">No armies garrisoned</div>'}
-        <div style="font-size:11px;color:${slots>0?'#5DCAA5':'#EF9F27'};margin-bottom:8px">${slots>0?`${slots} slot${slots!==1?'s':''} available`:'Full'}</div>
-        ${isGM?`<div style="display:flex;gap:6px;margin-bottom:6px">
-          <select id="garrison-select-${f.id}" style="flex:1;padding:4px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px">
-            <option value="">— garrison army —</option>
-            ${armies.filter(a=>!garrisoned.includes(a.id)).map(a=>`<option value="${a.id}">${a.name}</option>`).join('')}
-          </select>
-          <button class="rout-btn holds" onclick="garrisonArmy('${f.id}')">Add</button>
+        <div class="stats-row">
+          <div class="stat-box"><div class="stat-label">AC</div><div class="stat-value">${f.ac}</div></div>
+          <div class="stat-box"><div class="stat-label">HP</div><div class="stat-value">${f.hp}/${f.maxHp}</div></div>
         </div>
-        ${garrisoned.length>0?`<div style="display:flex;flex-wrap:wrap;gap:4px">${garrisoned.map(id=>{const a=armies.find(x=>x.id===id);return a?`<button class="cond-btn active outflanked" onclick="removeFromGarrison('${f.id}','${id}')">${a.name} ✕</button>`:''}).join('')}</div>`:''}
-        `:''}
+        <div class="hp-row" style="margin-top:4px">
+          <span class="hp-label">HP</span>
+          <div class="hp-controls">
+            ${isGM?`<button class="hp-btn" onclick="changeFortHp('${f.id}',-1)">−</button>`:''}
+            <span class="hp-display">${f.hp}</span>
+            <span class="hp-max">/ ${f.maxHp}</span>
+            ${isGM?`<button class="hp-btn" onclick="changeFortHp('${f.id}',1)">+</button>`:''}
+          </div>
+          <div class="hp-bar-wrap"><div class="hp-bar" style="width:${hpPct}%;background:${hpColor}"></div></div>
+        </div>
       </div>
     </div>`;
   }
@@ -663,6 +736,32 @@ window.executeRoll = async (attackerId,targetId,rollType) => {
   await resolveRoll(attackerId,targetId,rollType); targetingMode=null; await saveData(); render();
 };
 window.cancelTargeting = async () => { targetingMode=null; await saveData(); render(); };
+
+window.attackFort = async (attackerId, fortId, rollType) => {
+  const atk=armies.find(a=>a.id===attackerId);
+  const fort=fortifications.find(f=>f.id===fortId);
+  if (!atk||!fort) return;
+  const as=getModifiedStats(atk);
+  const isRanged=rollType.startsWith('ranged');
+  const mapNum=parseInt(rollType.slice(-1))||0;
+  const map=mapNum===0?0:mapNum===1?-5:-10;
+  if (isRanged&&(atk.shots||0)<=0) { showResult('No shots remaining!',null); return; }
+  if (isRanged) atk.shots=Math.max(0,(atk.shots||0)-1);
+  const roll=Math.floor(Math.random()*20)+1;
+  const modifier=(isRanged?as.rng:as.atk)+map;
+  const total=roll+modifier;
+  const degree=getDegree(roll,total,fort.ac);
+  let outcome='';
+  if (degree==='crit-success') { fort.hp=Math.max(0,fort.hp-2); outcome=`Crit Hit! ${fort.name} −2 HP (${fort.hp}/${fort.maxHp})`; }
+  else if (degree==='success') { fort.hp=Math.max(0,fort.hp-1); outcome=`Hit! ${fort.name} −1 HP (${fort.hp}/${fort.maxHp})`; }
+  else if (degree==='failure') outcome='Miss.';
+  else outcome='Critical Miss!';
+  if (fort.hp===0) outcome+=` · ${fort.name} DESTROYED`;
+  else if (fort.hp<=Math.floor(fort.maxHp/2)) outcome+=` · ⚠ Damaged`;
+  showResult(`${total}`,degree,`d20(${roll}) +${modifier} vs Fort AC ${fort.ac}`,outcome);
+  OBR.notification.show(`${atk.name} attacks ${fort.name}: ${total} — ${outcome}`,['crit-success','success'].includes(degree)?'INFO':'WARNING');
+  targetingMode=null; await saveData(); render();
+};
 window.setTerrain = async (t) => {
   terrain = t;
   // Apply swamp mired conditions at battle start
@@ -691,26 +790,11 @@ window.deleteArmy = async (armyId) => {
   for (const f of fortifications) f.garrisonedArmies=(f.garrisonedArmies||[]).filter(id=>id!==armyId);
   await saveData(); render();
 };
-window.addFort = async () => {
-  const name=document.getElementById('fort-name')?.value?.trim()||'Fortification';
-  const type=document.getElementById('fort-type')?.value||'keep';
-  fortifications.push({id:crypto.randomUUID(),name,type,maxArmies:FORT_TYPES[type].maxArmies,garrisonedArmies:[]});
-  await saveData(); render();
-};
 window.deleteFort = async (fortId) => { fortifications=fortifications.filter(f=>f.id!==fortId); await saveData(); render(); };
-window.garrisonArmy = async (fortId) => {
+window.changeFortHp = async (fortId, delta) => {
   const f=fortifications.find(x=>x.id===fortId); if(!f) return;
-  const armyId=document.getElementById(`garrison-select-${fortId}`)?.value; if(!armyId) return;
-  if ((f.garrisonedArmies||[]).length>=f.maxArmies) { OBR.notification.show(`${f.name} is full!`,'WARNING'); return; }
-  f.garrisonedArmies=f.garrisonedArmies||[];
-  if (!f.garrisonedArmies.includes(armyId)) f.garrisonedArmies.push(armyId);
-  const a=armies.find(x=>x.id===armyId); if(a){a.conditions=a.conditions||{};a.conditions.fortified=true;}
-  await saveData(); render();
-};
-window.removeFromGarrison = async (fortId,armyId) => {
-  const f=fortifications.find(x=>x.id===fortId); if(!f) return;
-  f.garrisonedArmies=(f.garrisonedArmies||[]).filter(id=>id!==armyId);
-  const a=armies.find(x=>x.id===armyId); if(a&&a.conditions) delete a.conditions.fortified;
+  f.hp=Math.max(0,Math.min(f.maxHp,f.hp+delta));
+  if (f.hp===0) OBR.notification.show(`${f.name} destroyed!`,'ERROR');
   await saveData(); render();
 };
 
