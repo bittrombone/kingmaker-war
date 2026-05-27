@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Fortification</title>
+  <link rel="stylesheet" href="style.css"/>
+  <style>
+    body { padding: 0; margin: 0; }
+    .card-wrap { padding: 12px; }
+    .name-row { display: flex; gap: 6px; margin-bottom: 10px; }
+    .name-row input { flex: 1; padding: 5px 8px; background: #111; border: 1px solid #333; border-radius: 4px; color: #D3D1C7; font-size: 14px; font-weight: 500; }
+    .type-select { width: 100%; padding: 5px 8px; background: #111; border: 1px solid #333; border-radius: 4px; color: #9F8FEF; font-size: 12px; margin-bottom: 10px; }
+    .stat-row { display: flex; gap: 8px; margin-bottom: 10px; }
+    .stat-box { flex: 1; background: #1a1535; border: 1px solid #7F77DD; border-radius: 6px; padding: 8px; text-align: center; }
+    .stat-label { font-size: 10px; color: #9F8FEF; letter-spacing: 0.05em; margin-bottom: 4px; }
+    .stat-val { font-size: 22px; font-weight: 600; color: #D3D1C7; }
+    .hp-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .hp-bar-wrap { flex: 1; background: #111; border-radius: 3px; height: 6px; overflow: hidden; }
+    .hp-bar { height: 100%; border-radius: 3px; transition: width 0.2s, background 0.2s; }
+    .save-btn { width: 100%; padding: 8px; background: #7F77DD; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 13px; }
+    .save-btn:hover { background: #6a62c4; }
+    .damaged { font-size: 11px; color: #EF9F27; text-align: center; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+<div class="card-wrap" id="card">
+  <div style="font-size:11px;color:#666;text-align:center;padding:20px">Loading...</div>
+</div>
+<script>
+const params = new URLSearchParams(window.location.search);
+const fortId = params.get('fortId');
+const itemId  = params.get('itemId');
+
+const FORT_TYPES = {
+  castle:      { label:'Castle',      ac:30, maxHp:8 },
+  keep:        { label:'Keep',        ac:25, maxHp:5 },
+  stone_wall:  { label:'Stone Wall',  ac:20, maxHp:3 },
+  tower:       { label:'Tower',       ac:20, maxHp:2 },
+  wooden_wall: { label:'Wooden Wall', ac:15, maxHp:2 },
+  trench:      { label:'Trench',      ac:15, maxHp:1 },
+};
+
+let fort = null;
+
+// Load from URL immediately
+try {
+  const d = params.get('data');
+  if (d) { fort = JSON.parse(decodeURIComponent(d)); renderCard(); }
+} catch(e) {}
+
+window.addEventListener('message', (event) => {
+  if (event.data?.type === 'FORT_UPDATE' && event.data?.fort?.id === fortId) {
+    fort = event.data.fort; renderCard();
+  }
+});
+
+function sendToParent(type, payload) {
+  try { window.parent?.postMessage({ type, ...payload }, '*'); } catch(e) {}
+  try { window.top?.postMessage({ type, ...payload }, '*'); } catch(e) {}
+  try { localStorage.setItem(`KW_${type}`, JSON.stringify({ type, ...payload, ts: Date.now() })); } catch(e) {}
+}
+
+function renderCard() {
+  const card = document.getElementById('card');
+  if (!fort) { card.innerHTML=`<div style="font-size:11px;color:#666;text-align:center;padding:20px">Fort not found</div>`; return; }
+
+  const hpPct = fort.maxHp > 0 ? (fort.hp / fort.maxHp) * 100 : 0;
+  const hpColor = hpPct > 50 ? '#7F77DD' : hpPct > 25 ? '#EF9F27' : '#E24B4A';
+  const damaged = fort.hp <= Math.floor(fort.maxHp / 2) && fort.hp > 0;
+  const destroyed = fort.hp === 0;
+
+  card.innerHTML = `
+    <div class="name-row">
+      <input id="fort-name" type="text" value="${fort.name}" placeholder="Fortification name"/>
+    </div>
+    <select class="type-select" onchange="applyType(this.value)">
+      ${Object.entries(FORT_TYPES).map(([k,v])=>`<option value="${k}" ${fort.type===k?'selected':''}>${v.label} (AC ${v.ac} · ${v.maxHp} HP)</option>`).join('')}
+    </select>
+    <div class="stat-row">
+      <div class="stat-box">
+        <div class="stat-label">AC</div>
+        <div class="stat-val">${fort.ac}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">MAX HP</div>
+        <div class="stat-val">${fort.maxHp}</div>
+      </div>
+    </div>
+    <div class="hp-row">
+      <span style="font-size:11px;color:#666">HP</span>
+      <button class="hp-btn" onclick="changeHp(-1)">−</button>
+      <span style="font-size:15px;font-weight:600;min-width:24px;text-align:center">${fort.hp}</span>
+      <button class="hp-btn" onclick="changeHp(1)">+</button>
+      <span style="font-size:11px;color:#666">/ ${fort.maxHp}</span>
+      <div class="hp-bar-wrap"><div class="hp-bar" style="width:${hpPct}%;background:${hpColor}"></div></div>
+    </div>
+    ${damaged && !destroyed ? `<div class="damaged">⚠ Damaged — needs repair before full benefits apply</div>` : ''}
+    ${destroyed ? `<div class="damaged" style="color:#E24B4A">✕ Destroyed</div>` : ''}
+    <button class="save-btn" onclick="doSave()">Save</button>
+  `;
+}
+
+window.applyType = (type) => {
+  const ft = FORT_TYPES[type];
+  if (!ft) return;
+  fort.type = type;
+  fort.ac = ft.ac;
+  fort.maxHp = ft.maxHp;
+  fort.hp = Math.min(fort.hp, fort.maxHp);
+  renderCard();
+};
+
+window.changeHp = (d) => {
+  fort.hp = Math.max(0, Math.min(fort.maxHp, fort.hp + d));
+  renderCard();
+};
+
+window.doSave = () => {
+  fort.name = document.getElementById('fort-name')?.value?.trim() || fort.name;
+  sendToParent('SAVE_FORT', { fort, itemId });
+  const btn = document.querySelector('.save-btn');
+  if (btn) { btn.textContent='Saved ✓'; btn.style.background='#5DCAA5'; setTimeout(()=>{btn.textContent='Save';btn.style.background='#7F77DD';},1500); }
+};
+</script>
+</body>
+</html>
