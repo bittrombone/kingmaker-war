@@ -489,13 +489,13 @@ function renderBattle() {
     html+=`<div class="rout-prompt" style="border-color:#EF9F27;background:#2a2200">
       <h3 style="color:#EF9F27">🎯 ${atk?.name||''} — ${rtDisplay}</h3>`;
     for (const t of armies.filter(a=>a.id!==targetingMode.armyId)) {
-      const label=isGM||t.friendly?t.name:'???';
+      const label=t.name; // always show name
       const hp=isGM||t.friendly?` (${t.hp}/${t.maxHp} HP)`:'';
       html+=`<div class="rout-army"><span class="rout-army-name">${label}${hp}</span><button class="rout-btn holds" onclick="executeRoll('${targetingMode.armyId}','${t.id}','${targetingMode.rollType}')">Target</button></div>`;
     }
-    // Siege armies can also target fortifications
+    // All armies can target fortifications
     const atkArmy = armies.find(a=>a.id===targetingMode.armyId);
-    if (atkArmy?.type==='Siege' && (targetingMode.rollType.startsWith('ranged')||targetingMode.rollType.startsWith('attack')) && fortifications.length>0) {
+    if ((targetingMode.rollType.startsWith('ranged')||targetingMode.rollType.startsWith('attack')) && fortifications.length>0) {
       html+=`<div style="font-size:10px;color:#9F8FEF;margin:6px 0 3px;letter-spacing:1px">FORTIFICATIONS</div>`;
       for (const f of fortifications) {
         if (f.hp<=0) continue;
@@ -550,7 +550,7 @@ function renderBattle() {
     for (const cond of CONDITIONS) {
       if (c[cond.key]) { const val=cond.hasValue&&c[cond.key]>0?` ${c[cond.key]}`:''; condHtml+=`<span class="cond-badge cond-${cond.key}">${cond.label}${val}</span>`; }
     }
-    const displayName=isGM||a.friendly?a.name:'??? (Enemy)';
+    const displayName=a.name; // always show name
     const displayHp=isGM||a.friendly?`${a.hp}/${a.maxHp} HP`:'';
     html+=`<div class="init-row ${side} ${isActive?'active-turn':''} ${c.routed?'routed':''} ${a.hp<=0?'defeated':''}"><div class="init-header"><span class="init-name">${isActive?'▶ ':''}${displayName}</span><span class="init-hp ${hpClass}">${displayHp}</span><span class="init-value">${a.initiative||'—'}</span></div>${condHtml?`<div class="init-conditions">${condHtml}</div>`:''}</div>`;
   }
@@ -603,7 +603,12 @@ function renderArmies() {
   if (armies.length===0) return `<div class="empty">No armies yet. Place tokens on the board and right-click them.</div>`;
   let html='';
   for (const a of armies) {
-    if (!isGM&&!a.friendly) continue;
+    // Players see enemy name only, no stats
+    if (!isGM && !a.friendly) {
+      const sel=a.id===selectedArmyId?'outline:2px solid #EF9F27;border-radius:8px;':'';
+      html+=`<div id="acard-${a.id}" style="${sel}"><div class="army-card"><div class="army-card-header enemy"><span class="army-title">${a.name}</span><span style="font-size:10px;color:#666">Enemy</span></div></div></div>`;
+      continue;
+    }
     const s=getModifiedStats(a);
     const c=a.conditions||{};
     const hpPct=a.maxHp>0?(a.hp/a.maxHp)*100:0;
