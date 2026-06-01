@@ -259,6 +259,7 @@ async function saveData() {
 
 // ── Name tags ──────────────────────────────────────────────────────
 const NAME_TAG_KEY = `${ID}/nametag`;
+const HP_TAG_KEY   = `${ID}/hptag`;
 async function updateNameTags() {
   if (!dataLoaded) return;
   try {
@@ -274,24 +275,45 @@ async function updateNameTags() {
       const token = items.find(i=>i.id===army.tokenId);
       if (!token) continue;
       const isActive = activeTurn?.id === army.id;
-      const labelColor = isActive ? '#00FF88' : army.friendly ? '#7EC8E3' : '#F09595';
-      const existingTags = items.filter(i=>i.metadata?.[NAME_TAG_KEY]===army.tokenId);
+      const nameColor = isActive ? '#00FF88' : army.friendly ? '#7EC8E3' : '#F09595';
+
+      // HP color: green → yellow → red
+      const hpPct = army.maxHp > 0 ? army.hp / army.maxHp : 1;
+      const hpColor = hpPct > 0.5 ? '#66DD66' : hpPct > 0.25 ? '#EF9F27' : '#E24B4A';
+
+      // Delete existing name + hp tags
+      const existingTags = items.filter(i =>
+        i.metadata?.[NAME_TAG_KEY] === army.tokenId ||
+        i.metadata?.[HP_TAG_KEY]   === army.tokenId
+      );
       if (existingTags.length > 0) await OBR.scene.items.deleteItems(existingTags.map(t=>t.id));
-      const label = buildText()
+
+      // Name tag — above token
+      const nameTag = buildText()
         .plainText(army.name)
-        .position({ x: token.position.x, y: token.position.y + grid * 0.6 })
+        .position({ x: token.position.x, y: token.position.y - grid * 0.6 })
         .layer('TEXT').locked(true).visible(true).textType('PLAIN')
         .fontSize(16).fontWeight(600).textAlign('CENTER')
-        .fillColor(labelColor).strokeColor('#111110').strokeWidth(3)
+        .fillColor(nameColor).strokeColor('#111110').strokeWidth(3)
         .attachedTo(army.tokenId).metadata({ [NAME_TAG_KEY]: army.tokenId }).build();
-      await OBR.scene.items.addItems([label]);
+
+      // HP tag — below token
+      const hpTag = buildText()
+        .plainText(`${army.hp}/${army.maxHp}`)
+        .position({ x: token.position.x, y: token.position.y + grid * 0.6 })
+        .layer('TEXT').locked(true).visible(true).textType('PLAIN')
+        .fontSize(14).fontWeight(600).textAlign('CENTER')
+        .fillColor(hpColor).strokeColor('#111110').strokeWidth(3)
+        .attachedTo(army.tokenId).metadata({ [HP_TAG_KEY]: army.tokenId }).build();
+
+      await OBR.scene.items.addItems([nameTag, hpTag]);
     }
   } catch(e) { console.warn('updateNameTags', e); }
 }
 async function removeNameTag(tokenId) {
   try {
     const items = await OBR.scene.items.getItems();
-    const tags = items.filter(i=>i.metadata?.[NAME_TAG_KEY]===tokenId);
+    const tags = items.filter(i=>i.metadata?.[NAME_TAG_KEY]===tokenId||i.metadata?.[HP_TAG_KEY]===tokenId);
     if (tags.length) await OBR.scene.items.deleteItems(tags.map(t=>t.id));
   } catch(e) {}
 }
