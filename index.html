@@ -5,12 +5,95 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Kingmaker War</title>
   <link rel="stylesheet" href="style.css"/>
+  <style>
+    /* Dice roller overlay */
+    #dice-overlay {
+      display:none;
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,0.7);
+      z-index:1000;
+      align-items:center;
+      justify-content:center;
+      flex-direction:column;
+    }
+    #dice-overlay.show { display:flex; }
+    .dice-face {
+      width:90px; height:90px;
+      background:#1a1a18;
+      border:3px solid #EF9F27;
+      border-radius:12px;
+      display:flex; align-items:center; justify-content:center;
+      font-size:42px; font-weight:700; color:#EF9F27;
+      box-shadow:0 0 30px rgba(239,159,39,0.4);
+      transition: transform 0.08s;
+    }
+    .dice-face.rolling { animation: diceRoll 0.6s ease-out; }
+    @keyframes diceRoll {
+      0%   { transform: rotate(0deg) scale(1); }
+      20%  { transform: rotate(-15deg) scale(1.1); }
+      40%  { transform: rotate(12deg) scale(0.95); }
+      60%  { transform: rotate(-8deg) scale(1.05); }
+      80%  { transform: rotate(4deg) scale(0.98); }
+      100% { transform: rotate(0deg) scale(1); }
+    }
+    .dice-label { color:#666; font-size:11px; margin-top:8px; letter-spacing:1px; }
+    .dice-close { margin-top:16px; padding:6px 20px; background:#333; border:1px solid #555; border-radius:4px; color:#aaa; cursor:pointer; font-size:12px; }
+    .dice-close:hover { background:#444; }
+    .dice-btn-row { margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+    .dice-type-btn { padding:5px 12px; background:#1a1a18; border:1px solid #444; border-radius:4px; color:#aaa; cursor:pointer; font-size:12px; }
+    .dice-type-btn:hover { border-color:#EF9F27; color:#EF9F27; }
+    .dice-type-btn.active { border-color:#EF9F27; color:#EF9F27; background:#2a2200; }
+    /* Loading screen */
+    #loading-screen {
+      position:fixed; inset:0; background:#0d0d0b;
+      display:flex; flex-direction:column;
+      align-items:center; justify-content:center;
+      z-index:9999; gap:12px;
+    }
+    #loading-screen.hidden { display:none; }
+    .loading-spinner {
+      width:32px; height:32px; border:3px solid #333;
+      border-top-color:#EF9F27; border-radius:50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .loading-text { color:#666; font-size:12px; }
+    .loading-retry { margin-top:8px; padding:6px 16px; background:#333; border:1px solid #555; border-radius:4px; color:#aaa; cursor:pointer; font-size:11px; display:none; }
+  </style>
 </head>
 <body>
-<div class="app" id="app">
+<!-- Loading screen shown until OBR is ready -->
+<div id="loading-screen">
+  <div class="loading-spinner"></div>
+  <div class="loading-text" id="loading-msg">Connecting to Owlbear Rodeo…</div>
+  <button class="loading-retry" id="loading-retry" onclick="retryInit()">Retry</button>
+</div>
+
+<!-- Dice overlay -->
+<div id="dice-overlay">
+  <div class="dice-face" id="dice-face">20</div>
+  <div class="dice-label" id="dice-label">d20</div>
+  <div class="dice-btn-row">
+    <button class="dice-type-btn active" onclick="setDiceType(4)"  id="dbtn-4" >d4</button>
+    <button class="dice-type-btn active" onclick="setDiceType(6)"  id="dbtn-6" >d6</button>
+    <button class="dice-type-btn active" onclick="setDiceType(8)"  id="dbtn-8" >d8</button>
+    <button class="dice-type-btn active" onclick="setDiceType(10)" id="dbtn-10">d10</button>
+    <button class="dice-type-btn active" onclick="setDiceType(12)" id="dbtn-12">d12</button>
+    <button class="dice-type-btn active" onclick="setDiceType(20)" id="dbtn-20">d20</button>
+    <button class="dice-type-btn active" onclick="setDiceType(100)"id="dbtn-100">d100</button>
+  </div>
+  <button class="dice-close" onclick="rollDice()">🎲 Roll Again</button>
+  <button class="dice-close" onclick="closeDice()" style="margin-top:4px">Close</button>
+</div>
+
+<div class="app" id="app" style="display:none">
   <div class="header">
     <h1>⚔ KINGMAKER WAR</h1>
-    <span id="scene-status" style="font-size:10px;color:#666">Loading...</span>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span id="scene-status" style="font-size:10px;color:#666">—</span>
+      <button onclick="openDice()" style="padding:2px 8px;background:#1a1a18;border:1px solid #444;border-radius:4px;color:#EF9F27;cursor:pointer;font-size:14px" title="Dice Roller">🎲</button>
+    </div>
   </div>
   <div class="tabs">
     <div class="tab active" onclick="showTab('battle')">Battle</div>
@@ -19,262 +102,359 @@
   </div>
   <div class="content" id="content"></div>
 </div>
+
 <script>
 (async function() {
-const { default: OBR } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
-const ID = "com.kingmaker.war";
-const BASE_URL = "https://bittrombone.github.io/kingmaker-war";
 
-let isGM = false;
-let dataLoaded = false;
-let armies = [];
-let fortifications = [];
-let round = 1;
-let currentTurnIdx = 0;
-let routQueue = [];
-let targetingMode = null;
-let activeTab = 'battle';
-let resultTimeout = null;
-let terrain = 'plain';
-let defenderSide = 'friendly'; // which side is defending for hill/river/settlement
+// ─── Dice roller ──────────────────────────────────────────────────
+let diceType = 20;
+let diceRolling = false;
 
-const TERRAINS = {
-  plain:      { label:'Plain',      desc:'No modifiers. Cavalry +1 to strikes.' },
-  hill:       { label:'Hill',       desc:'Defenders +2 AC vs ranged. Attackers −2 Maneuver advancing.' },
-  forest:     { label:'Forest',     desc:'All ranged −2. Cavalry −2 Maneuver.' },
-  swamp:      { label:'Swamp',      desc:'All armies Mired 1. Cavalry Mired 2.' },
-  mountain:   { label:'Mountain',   desc:'All armies −4 Maneuver. Siege cannot deploy.' },
-  river:      { label:'River',      desc:'Attackers Mired 1 round 1. Defenders +2 ranged round 1.' },
-  lake:       { label:'Lake',       desc:'No battle possible.' },
-  ruin:       { label:'Ruin',       desc:'All armies −2 Maneuver. All ranged −1.' },
-  settlement: { label:'Settlement', desc:'All defending armies +1 to all checks.' },
+window.openDice = function() {
+  document.getElementById('dice-overlay').classList.add('show');
+  rollDice();
+};
+window.closeDice = function() {
+  document.getElementById('dice-overlay').classList.remove('show');
+};
+window.setDiceType = function(n) {
+  diceType = n;
+  document.querySelectorAll('.dice-type-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById(`dbtn-${n}`);
+  if (btn) btn.classList.add('active');
+  document.getElementById('dice-label').textContent = `d${n}`;
+  rollDice();
+};
+window.rollDice = function() {
+  if (diceRolling) return;
+  diceRolling = true;
+  const face = document.getElementById('dice-face');
+  face.classList.remove('rolling');
+  void face.offsetWidth; // force reflow
+  face.classList.add('rolling');
+  // Flash random numbers during roll
+  let ticks = 0;
+  const interval = setInterval(() => {
+    face.textContent = Math.floor(Math.random() * diceType) + 1;
+    ticks++;
+    if (ticks > 8) {
+      clearInterval(interval);
+      const result = Math.floor(Math.random() * diceType) + 1;
+      face.textContent = result;
+      document.getElementById('dice-label').textContent = `d${diceType} → ${result}`;
+      diceRolling = false;
+    }
+  }, 70);
 };
 
-function getTerrainMods(army, rollType) {
-  const isDefender = army.friendly === (defenderSide === 'friendly');
-  const isAttacker = !isDefender;
-  const isRanged   = rollType && rollType.startsWith('ranged');
-  const isManeuver = rollType === 'maneuver';
-  const isMelee    = rollType && rollType.startsWith('attack');
-  let bonus = 0;
-  switch(terrain) {
-    case 'plain':
-      if ((isMelee||isRanged) && army.type==='Cavalry') bonus += 1;
-      break;
-    case 'hill':
-      if (isAttacker && isManeuver) bonus -= 2;
-      break;
-    case 'forest':
-      if (isRanged) bonus -= 2;
-      if (isManeuver && army.type==='Cavalry') bonus -= 2;
-      break;
-    case 'mountain':
-      if (isManeuver) bonus -= 4;
-      break;
-    case 'river':
-      if (isAttacker && isManeuver && round===1) bonus -= 2;
-      if (isDefender && isRanged && round===1) bonus += 2;
-      break;
-    case 'ruin':
-      if (isManeuver) bonus -= 2;
-      if (isRanged) bonus -= 1;
-      break;
-    case 'settlement':
-      if (isDefender) bonus += 1;
-      break;
-  }
-  return bonus;
-}
+// ─── OBR Init with retry logic ────────────────────────────────────
+let initAttempts = 0;
+const MAX_ATTEMPTS = 5;
+let initTimer = null;
 
-function getTerrainAcMod(targetArmy) {
-  const isDefender = targetArmy.friendly === (defenderSide === 'friendly');
-  if (terrain === 'hill' && isDefender) return 2;
-  return 0;
-}
+async function attemptInit() {
+  initAttempts++;
+  const msg = document.getElementById('loading-msg');
+  const retryBtn = document.getElementById('loading-retry');
+  msg.textContent = `Connecting… (attempt ${initAttempts})`;
 
-const FORT_TYPES = {
-  castle:      { label:'Castle',      maxArmies:6 },
-  keep:        { label:'Keep',        maxArmies:4 },
-  stone_wall:  { label:'Stone Wall',  maxArmies:2 },
-  tower:       { label:'Tower',       maxArmies:1 },
-  wooden_wall: { label:'Wooden Wall', maxArmies:2 },
-  trench:      { label:'Trench',      maxArmies:1 },
-};
-
-const CONDITIONS = [
-  { key:'shaken',     label:'Shaken',     hasValue:true,  max:4 },
-  { key:'weary',      label:'Weary',      hasValue:true,  max:4 },
-  { key:'mired',      label:'Mired',      hasValue:true,  max:4 },
-  { key:'outflanked', label:'Outflanked', hasValue:false },
-  { key:'fortified',  label:'Fortified',  hasValue:false },
-  { key:'routed',     label:'Routed',     hasValue:false },
-  { key:'pinned',     label:'Pinned',     hasValue:false },
-  { key:'distant',    label:'Distant',    hasValue:false },
-  { key:'concealed',  label:'Concealed',  hasValue:false },
-  { key:'engaged',    label:'Engaged',    hasValue:false },
-];
-
-function getGearBonuses(gear) {
-  const g = gear || {};
-  return { ac: g.armor||0, atk: g.melee||0, rng: g.ranged||0 };
-}
-
-function getModifiedStats(army) {
-  const c = army.conditions || {};
-  const shaken=c.shaken||0, weary=c.weary||0, mired=c.mired||0;
-  const outflanked=c.outflanked?2:0, fortified=c.fortified?4:0;
-  const gb = getGearBonuses(army.gear);
-  return {
-    ac:army.ac-weary-outflanked+fortified+gb.ac,
-    man:army.man-weary-mired,
-    mor:army.mor-shaken+fortified,
-    atk:army.atk+gb.atk, rng:army.rng+gb.rng, sct:army.sct,
-    manDC:10+army.man-weary-mired,
-    morDC:10+army.mor-shaken,
-  };
-}
-
-// ─── Data ─────────────────────────────────────────────────────────
-async function loadData() {
   try {
-    const meta = await OBR.room.getMetadata();
-    const d = meta[`${ID}/data`];
-    if (d) {
-      armies=d.armies||[]; fortifications=d.fortifications||[];
-      round=d.round||1; currentTurnIdx=d.currentTurnIdx||0;
-      routQueue=d.routQueue||[]; targetingMode=d.targetingMode||null;
-    }
-  } catch(e) { console.warn('loadData',e); }
-}
+    const { default: OBR } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
+    window._OBR = OBR;
 
-async function saveData() {
-  if (!dataLoaded) return;
-  try {
-    await OBR.room.setMetadata({[`${ID}/data`]:{armies,fortifications,round,currentTurnIdx,routQueue,targetingMode,terrain,defenderSide}});
-    // Update name tags whenever data changes
-    updateNameTags();
-  } catch(e) { console.warn('saveData',e); }
-}
+    // Give OBR a moment to settle if it loads fast
+    await new Promise(r => setTimeout(r, 300));
 
-// ─── Name tags ───────────────────────────────────────────────────
-const NAME_TAG_KEY = `${ID}/nametag`;
-
-async function updateNameTags() {
-  if (!dataLoaded) return;
-  try {
-    const isReady = await OBR.scene.isReady();
-    if (!isReady) return;
-    const sorted = [...armies].sort((a,b)=>(b.initiative||0)-(a.initiative||0));
-    const activeTurn = sorted[currentTurnIdx];
-    const items = await OBR.scene.items.getItems();
-    const { buildText } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
-    const grid = await OBR.scene.grid.getDpi();
-
-    for (const army of armies) {
-      if (!army.tokenId) continue;
-      const token = items.find(i=>i.id===army.tokenId);
-      if (!token) continue;
-
-      const isActive = activeTurn?.id === army.id;
-      const labelColor = isActive ? '#00FF88' : army.friendly ? '#7EC8E3' : '#F09595';
-      const strokeColor = isActive ? '#003311' : '#111110';
-
-      // Always delete existing tag and recreate to ensure color updates
-      const existingTags = items.filter(i=>i.metadata?.[NAME_TAG_KEY]===army.tokenId);
-      if (existingTags.length > 0) {
-        await OBR.scene.items.deleteItems(existingTags.map(t=>t.id));
-      }
-
-      const label = buildText()
-        .plainText(army.name)
-        .position({ x: token.position.x, y: token.position.y + grid * 0.6 })
-        .layer('TEXT')
-        .locked(true)
-        .visible(true)
-        .textType('PLAIN')
-        .fontSize(16)
-        .fontWeight(600)
-        .textAlign('CENTER')
-        .fillColor(labelColor)
-        .strokeColor(strokeColor)
-        .strokeWidth(3)
-        .attachedTo(army.tokenId)
-        .metadata({ [NAME_TAG_KEY]: army.tokenId })
-        .build();
-      await OBR.scene.items.addItems([label]);
-    }
-  } catch(e) { console.warn('updateNameTags', e); }
-}
-
-async function removeNameTag(tokenId) {
-  try {
-    const items = await OBR.scene.items.getItems();
-    const tag = items.find(i=>i.metadata?.[NAME_TAG_KEY]===tokenId);
-    if (tag) await OBR.scene.items.deleteItems([tag.id]);
-  } catch(e) {}
-}
-
-// ─── Sync armies from token metadata on scene
-async function syncArmiesFromTokens() {
-  try {
-    const items = await OBR.scene.items.getItems();
-    const tokenArmies = items
-      .filter(i => i.layer==='CHARACTER' && i.metadata[`${ID}/army`])
-      .map(i => {
-        const meta = i.metadata[`${ID}/army`];
-        const existing = armies.find(a=>a.id===meta.id);
-        return existing || {
-          id: meta.id,
-          name: i.name||'Army',
-          friendly: meta.friendly||false,
-          initiative: 0,
-          ac: meta.ac||16, man: meta.man||4, mor: meta.mor||10,
-          sct: meta.sct||7, atk: meta.atk||9, rng: meta.rng||0,
-          maxHp: meta.maxHp||4, rt: meta.rt||2,
-          maxShots: meta.maxShots||0, shots: meta.shots||0,
-          hp: meta.hp||meta.maxHp||4,
-          conditions: meta.conditions||{},
-          gear: meta.gear||[],
-          tokenId: i.id,
-        };
+    // Wait for OBR to be ready with our own timeout
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('OBR ready timeout')), 8000);
+      OBR.onReady(() => {
+        clearTimeout(timeout);
+        resolve();
       });
-    // Merge: keep existing data, add new tokens
-    // Also merge gear from token metadata into existing armies
-    const existingIds = armies.map(a=>a.id);
-    for (const ta of tokenArmies) {
-      if (!existingIds.includes(ta.id)) {
-        armies.push(ta);
-      } else {
-        // Merge gear from token if existing army has none
-        const existing = armies.find(a=>a.id===ta.id);
-        if (existing && !existing.gear?.length && ta.gear?.length) {
-          existing.gear = ta.gear;
+    });
+
+    // OBR is ready — run main app
+    clearTimeout(initTimer);
+    await runApp(OBR);
+
+  } catch(e) {
+    console.warn(`Init attempt ${initAttempts} failed:`, e);
+    if (initAttempts < MAX_ATTEMPTS) {
+      msg.textContent = `Retrying… (${initAttempts}/${MAX_ATTEMPTS})`;
+      initTimer = setTimeout(attemptInit, 1500);
+      if (initAttempts >= 2) retryBtn.style.display = 'block';
+    } else {
+      msg.textContent = 'Could not connect. Click Retry.';
+      retryBtn.style.display = 'block';
+    }
+  }
+}
+
+window.retryInit = function() {
+  initAttempts = 0;
+  clearTimeout(initTimer);
+  attemptInit();
+};
+
+// Start init
+attemptInit();
+
+// ─── Main app ─────────────────────────────────────────────────────
+async function runApp(OBR) {
+  const ID = "com.kingmaker.war";
+  const BASE_URL = "https://bittrombone.github.io/kingmaker-war";
+
+  let isGM = false;
+  let dataLoaded = false;
+  let armies = [];
+  let fortifications = [];
+  let round = 1;
+  let currentTurnIdx = 0;
+  let routQueue = [];
+  let targetingMode = null;
+  let activeTab = 'battle';
+  let resultTimeout = null;
+  let terrain = 'plain';
+  let defenderSide = 'friendly';
+
+  // Hide loading, show app
+  document.getElementById('loading-screen').classList.add('hidden');
+  document.getElementById('app').style.display = 'flex';
+  // The app div needs flex-direction column
+  document.getElementById('app').style.flexDirection = 'column';
+  document.getElementById('app').style.height = '100%';
+
+  const TERRAINS = {
+    plain:      { label:'Plain',      desc:'No modifiers. Cavalry +1 to strikes.' },
+    hill:       { label:'Hill',       desc:'Defenders +2 AC vs ranged. Attackers −2 Maneuver advancing.' },
+    forest:     { label:'Forest',     desc:'All ranged −2. Cavalry −2 Maneuver.' },
+    swamp:      { label:'Swamp',      desc:'All armies Mired 1. Cavalry Mired 2.' },
+    mountain:   { label:'Mountain',   desc:'All armies −4 Maneuver. Siege cannot deploy.' },
+    river:      { label:'River',      desc:'Attackers Mired 1 round 1. Defenders +2 ranged round 1.' },
+    lake:       { label:'Lake',       desc:'No battle possible.' },
+    ruin:       { label:'Ruin',       desc:'All armies −2 Maneuver. All ranged −1.' },
+    settlement: { label:'Settlement', desc:'All defending armies +1 to all checks.' },
+  };
+
+  function getTerrainMods(army, rollType) {
+    const isDefender = army.friendly === (defenderSide === 'friendly');
+    const isAttacker = !isDefender;
+    const isRanged   = rollType && rollType.startsWith('ranged');
+    const isManeuver = rollType === 'maneuver';
+    const isMelee    = rollType && rollType.startsWith('attack');
+    let bonus = 0;
+    switch(terrain) {
+      case 'plain':
+        if ((isMelee||isRanged) && army.type==='Cavalry') bonus += 1;
+        break;
+      case 'hill':
+        if (isAttacker && isManeuver) bonus -= 2;
+        break;
+      case 'forest':
+        if (isRanged) bonus -= 2;
+        if (isManeuver && army.type==='Cavalry') bonus -= 2;
+        break;
+      case 'mountain':
+        if (isManeuver) bonus -= 4;
+        break;
+      case 'river':
+        if (isAttacker && isManeuver && round===1) bonus -= 2;
+        if (isDefender && isRanged && round===1) bonus += 2;
+        break;
+      case 'ruin':
+        if (isManeuver) bonus -= 2;
+        if (isRanged) bonus -= 1;
+        break;
+      case 'settlement':
+        if (isDefender) bonus += 1;
+        break;
+    }
+    return bonus;
+  }
+
+  function getTerrainAcMod(targetArmy) {
+    const isDefender = targetArmy.friendly === (defenderSide === 'friendly');
+    if (terrain === 'hill' && isDefender) return 2;
+    return 0;
+  }
+
+  const FORT_TYPES = {
+    castle:      { label:'Castle',      maxArmies:6 },
+    keep:        { label:'Keep',        maxArmies:4 },
+    stone_wall:  { label:'Stone Wall',  maxArmies:2 },
+    tower:       { label:'Tower',       maxArmies:1 },
+    wooden_wall: { label:'Wooden Wall', maxArmies:2 },
+    trench:      { label:'Trench',      maxArmies:1 },
+  };
+
+  const CONDITIONS = [
+    { key:'shaken',     label:'Shaken',     hasValue:true,  max:4 },
+    { key:'weary',      label:'Weary',      hasValue:true,  max:4 },
+    { key:'mired',      label:'Mired',      hasValue:true,  max:4 },
+    { key:'outflanked', label:'Outflanked', hasValue:false },
+    { key:'fortified',  label:'Fortified',  hasValue:false },
+    { key:'routed',     label:'Routed',     hasValue:false },
+    { key:'pinned',     label:'Pinned',     hasValue:false },
+    { key:'distant',    label:'Distant',    hasValue:false },
+    { key:'concealed',  label:'Concealed',  hasValue:false },
+    { key:'engaged',    label:'Engaged',    hasValue:false },
+  ];
+
+  function getGearBonuses(gear) {
+    const g = gear || {};
+    return { ac: g.armor||0, atk: g.melee||0, rng: g.ranged||0 };
+  }
+
+  function getModifiedStats(army) {
+    const c = army.conditions || {};
+    const shaken=c.shaken||0, weary=c.weary||0, mired=c.mired||0;
+    const outflanked=c.outflanked?2:0, fortified=c.fortified?4:0;
+    const gb = getGearBonuses(army.gear);
+    return {
+      ac:army.ac-weary-outflanked+fortified+gb.ac,
+      man:army.man-weary-mired,
+      mor:army.mor-shaken+fortified,
+      atk:army.atk+gb.atk, rng:army.rng+gb.rng, sct:army.sct,
+      manDC:10+army.man-weary-mired,
+      morDC:10+army.mor-shaken,
+    };
+  }
+
+  // ─── Data ─────────────────────────────────────────────────────────
+  async function loadData() {
+    try {
+      const meta = await OBR.room.getMetadata();
+      const d = meta[`${ID}/data`];
+      if (d) {
+        armies=d.armies||[]; fortifications=d.fortifications||[];
+        round=d.round||1; currentTurnIdx=d.currentTurnIdx||0;
+        routQueue=d.routQueue||[]; targetingMode=d.targetingMode||null;
+        terrain=d.terrain||'plain'; defenderSide=d.defenderSide||'friendly';
+      }
+    } catch(e) { console.warn('loadData',e); }
+  }
+
+  async function saveData() {
+    if (!dataLoaded) return;
+    try {
+      await OBR.room.setMetadata({[`${ID}/data`]:{armies,fortifications,round,currentTurnIdx,routQueue,targetingMode,terrain,defenderSide}});
+      updateNameTags();
+    } catch(e) { console.warn('saveData',e); }
+  }
+
+  // ─── Name tags ────────────────────────────────────────────────────
+  const NAME_TAG_KEY = `${ID}/nametag`;
+
+  async function updateNameTags() {
+    if (!dataLoaded) return;
+    try {
+      const isReady = await OBR.scene.isReady();
+      if (!isReady) return;
+      const sorted = [...armies].sort((a,b)=>(b.initiative||0)-(a.initiative||0));
+      const activeTurn = sorted[currentTurnIdx];
+      const items = await OBR.scene.items.getItems();
+      const { buildText } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
+      const grid = await OBR.scene.grid.getDpi();
+
+      for (const army of armies) {
+        if (!army.tokenId) continue;
+        const token = items.find(i=>i.id===army.tokenId);
+        if (!token) continue;
+
+        const isActive = activeTurn?.id === army.id;
+        const labelColor = isActive ? '#00FF88' : army.friendly ? '#7EC8E3' : '#F09595';
+        const strokeColor = isActive ? '#003311' : '#111110';
+
+        const existingTags = items.filter(i=>i.metadata?.[NAME_TAG_KEY]===army.tokenId);
+        if (existingTags.length > 0) {
+          await OBR.scene.items.deleteItems(existingTags.map(t=>t.id));
+        }
+
+        const label = buildText()
+          .plainText(army.name)
+          .position({ x: token.position.x, y: token.position.y + grid * 0.6 })
+          .layer('TEXT')
+          .locked(true)
+          .visible(true)
+          .textType('PLAIN')
+          .fontSize(16)
+          .fontWeight(600)
+          .textAlign('CENTER')
+          .fillColor(labelColor)
+          .strokeColor(strokeColor)
+          .strokeWidth(3)
+          .attachedTo(army.tokenId)
+          .metadata({ [NAME_TAG_KEY]: army.tokenId })
+          .build();
+        await OBR.scene.items.addItems([label]);
+      }
+    } catch(e) { console.warn('updateNameTags', e); }
+  }
+
+  async function removeNameTag(tokenId) {
+    try {
+      const items = await OBR.scene.items.getItems();
+      const tag = items.find(i=>i.metadata?.[NAME_TAG_KEY]===tokenId);
+      if (tag) await OBR.scene.items.deleteItems([tag.id]);
+    } catch(e) {}
+  }
+
+  // ─── Sync armies from tokens ──────────────────────────────────────
+  async function syncArmiesFromTokens() {
+    try {
+      const items = await OBR.scene.items.getItems();
+      const tokenArmies = items
+        .filter(i => i.layer==='CHARACTER' && i.metadata[`${ID}/army`])
+        .map(i => {
+          const meta = i.metadata[`${ID}/army`];
+          const existing = armies.find(a=>a.id===meta.id);
+          return existing || {
+            id: meta.id,
+            name: i.name||'Army',
+            friendly: meta.friendly||false,
+            initiative: 0,
+            ac: meta.ac||16, man: meta.man||4, mor: meta.mor||10,
+            sct: meta.sct||7, atk: meta.atk||9, rng: meta.rng||0,
+            maxHp: meta.maxHp||4, rt: meta.rt||2,
+            maxShots: meta.maxShots||0, shots: meta.shots||0,
+            hp: meta.hp||meta.maxHp||4,
+            conditions: meta.conditions||{},
+            gear: meta.gear||[],
+            tokenId: i.id,
+          };
+        });
+      const existingIds = armies.map(a=>a.id);
+      for (const ta of tokenArmies) {
+        if (!existingIds.includes(ta.id)) {
+          armies.push(ta);
+        } else {
+          const existing = armies.find(a=>a.id===ta.id);
+          if (existing && !existing.gear?.length && ta.gear?.length) {
+            existing.gear = ta.gear;
+          }
         }
       }
-    }
-    // Remove armies whose tokens no longer exist
-    const tokenIds = items.map(i=>i.id);
-    armies = armies.filter(a => !a.tokenId || tokenIds.includes(a.tokenId));
+      const tokenIds = items.map(i=>i.id);
+      armies = armies.filter(a => !a.tokenId || tokenIds.includes(a.tokenId));
 
-    // Sync fortifications from PROP layer tokens
-    const propItems = items.filter(i => i.layer==='PROP' && i.metadata[`${ID}/fort`]);
-    for (const pi of propItems) {
-      const meta = pi.metadata[`${ID}/fort`];
-      if (!fortifications.find(f=>f.id===meta.id)) {
-        fortifications.push({
-          id: meta.id, name: pi.name||'Fortification',
-          type: meta.type||'keep', ac: meta.ac||25,
-          maxHp: meta.maxHp||5, hp: meta.hp||meta.maxHp||5,
-          tokenId: pi.id,
-        });
+      const propItems = items.filter(i => i.layer==='PROP' && i.metadata[`${ID}/fort`]);
+      for (const pi of propItems) {
+        const meta = pi.metadata[`${ID}/fort`];
+        if (!fortifications.find(f=>f.id===meta.id)) {
+          fortifications.push({
+            id: meta.id, name: pi.name||'Fortification',
+            type: meta.type||'keep', ac: meta.ac||25,
+            maxHp: meta.maxHp||5, hp: meta.hp||meta.maxHp||5,
+            tokenId: pi.id,
+          });
+        }
       }
-    }
-    fortifications = fortifications.filter(f => !f.tokenId || tokenIds.includes(f.tokenId));
-  } catch(e) { console.warn('syncArmies',e); }
-}
+      fortifications = fortifications.filter(f => !f.tokenId || tokenIds.includes(f.tokenId));
+    } catch(e) { console.warn('syncArmies',e); }
+  }
 
-// ─── OBR Init ─────────────────────────────────────────────────────
-OBR.onReady(async () => {
+  // ─── OBR ready ────────────────────────────────────────────────────
   const role = await OBR.player.getRole();
   isGM = role==='GM';
   document.getElementById('scene-status').textContent = isGM?'GM':'Player';
@@ -291,6 +471,7 @@ OBR.onReady(async () => {
       armies=d.armies||[]; fortifications=d.fortifications||[];
       round=d.round||1; currentTurnIdx=d.currentTurnIdx||0;
       routQueue=d.routQueue||[]; targetingMode=d.targetingMode||null;
+      terrain=d.terrain||'plain'; defenderSide=d.defenderSide||'friendly';
       render();
     }
   });
@@ -304,7 +485,6 @@ OBR.onReady(async () => {
       const idx = armies.findIndex(a => a.id === updated.id);
       if (idx >= 0) armies[idx] = updated;
       else armies.push(updated);
-      // Update token name and metadata
       if (itemId) {
         try {
           await OBR.scene.items.updateItems([itemId], (items) => {
@@ -322,10 +502,9 @@ OBR.onReady(async () => {
     }
   });
 
-  // Poll localStorage for saves from statcard popover (fallback for sandboxed iframes)
+  // Poll localStorage for saves from statcard popover
   setInterval(async () => {
     try {
-      // Check for fort saves too
       const rawFort = localStorage.getItem('KW_SAVE_FORT');
       if (rawFort) {
         try {
@@ -348,7 +527,6 @@ OBR.onReady(async () => {
       const raw = localStorage.getItem('KW_SAVE_ARMY');
       if (!raw) return;
       const data = JSON.parse(raw);
-      // Only process recent saves (within last 5 seconds)
       if (!data.ts || Date.now() - data.ts > 5000) { localStorage.removeItem('KW_SAVE_ARMY'); return; }
       localStorage.removeItem('KW_SAVE_ARMY');
       const updated = data.army;
@@ -371,13 +549,12 @@ OBR.onReady(async () => {
     } catch(e) {}
   }, 500);
 
-  // Sync when tokens change
   OBR.scene.items.onChange(async () => {
     await syncArmiesFromTokens();
     render();
   });
 
-  // Context menu — stat card popover
+  // Context menu — stat card
   OBR.contextMenu.create({
     id: `${ID}/statcard`,
     icons: [{
@@ -387,9 +564,7 @@ OBR.onReady(async () => {
     }],
     async onClick(context, elementId) {
       const item = context.items[0]; if (!item) return;
-      // Read fresh data
       try { const m=await OBR.room.getMetadata(); const d=m[`${ID}/data`]; if(d){armies=d.armies||[];} } catch(e) {}
-      // Find or create army for this token
       let army = armies.find(a=>a.tokenId===item.id);
       if (!army) {
         const meta = item.metadata[`${ID}/army`]||{};
@@ -410,14 +585,12 @@ OBR.onReady(async () => {
         armies.push(army);
         await saveData();
       }
-      // Always sync gear from room metadata — token metadata may lag
       const roomMeta = await OBR.room.getMetadata();
       const roomData = roomMeta[`${ID}/data`];
       if (roomData?.armies) {
         const roomArmy = roomData.armies.find(a=>a.id===army.id);
-        if (roomArmy) army = roomArmy; // use room version which has latest gear
+        if (roomArmy) army = roomArmy;
       }
-      // Open popover
       const armyParam = encodeURIComponent(JSON.stringify(army));
       await OBR.popover.open({
         id: `${ID}/popover`,
@@ -460,410 +633,419 @@ OBR.onReady(async () => {
       });
     }
   });
-});
 
-// ─── Tabs ─────────────────────────────────────────────────────────
-window.showTab = function(tab) {
-  activeTab=tab;
-  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',['battle','armies','forts'][i]===tab));
-  render();
-};
+  // ─── Tabs ──────────────────────────────────────────────────────────
+  window.showTab = function(tab) {
+    activeTab=tab;
+    document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',['battle','armies','forts'][i]===tab));
+    render();
+  };
 
-function render() {
-  const c=document.getElementById('content'); if(!c) return;
-  if      (activeTab==='battle') c.innerHTML=renderBattle();
-  else if (activeTab==='armies') c.innerHTML=renderArmies();
-  else                           c.innerHTML=renderForts();
-}
-
-// ─── Battle ───────────────────────────────────────────────────────
-function renderBattle() {
-  const sorted=[...armies].sort((a,b)=>(b.initiative||0)-(a.initiative||0));
-  const activeTurn=sorted[currentTurnIdx]||null;
-  let html='';
-
-  // Targeting picker
-  if (targetingMode) {
-    const atk=armies.find(a=>a.id===targetingMode.armyId);
-    const rtDisplay = targetingMode.rollType.replace(/(\d)$/,(m)=>m==='0'?'':m==='1'?' 2':' 3').replace('attack','Strike').replace('ranged','Ranged').replace('maneuver','Maneuver').replace('morale','Morale');
-    html+=`<div class="rout-prompt" style="border-color:#EF9F27;background:#2a2200">
-      <h3 style="color:#EF9F27">🎯 ${atk?.name||''} — ${rtDisplay}</h3>`;
-    for (const t of armies.filter(a=>a.id!==targetingMode.armyId)) {
-      const label=t.name; // always show name
-      const hp=isGM||t.friendly?` (${t.hp}/${t.maxHp} HP)`:'';
-      html+=`<div class="rout-army"><span class="rout-army-name">${label}${hp}</span><button class="rout-btn holds" onclick="executeRoll('${targetingMode.armyId}','${t.id}','${targetingMode.rollType}')">Target</button></div>`;
-    }
-    // All armies can target fortifications
-    const atkArmy = armies.find(a=>a.id===targetingMode.armyId);
-    if ((targetingMode.rollType.startsWith('ranged')||targetingMode.rollType.startsWith('attack')) && fortifications.length>0) {
-      html+=`<div style="font-size:10px;color:#9F8FEF;margin:6px 0 3px;letter-spacing:1px">FORTIFICATIONS</div>`;
-      for (const f of fortifications) {
-        if (f.hp<=0) continue;
-        html+=`<div class="rout-army"><span class="rout-army-name" style="color:#9F8FEF">🏰 ${f.name} (HP ${f.hp}/${f.maxHp} · AC ${f.ac})</span><button class="rout-btn" style="background:#1a1535;color:#9F8FEF;border:1px solid #7F77DD" onclick="attackFort('${targetingMode.armyId}','${f.id}','${targetingMode.rollType}')">Siege</button></div>`;
-      }
-    }
-    html+=`<button class="btn-secondary" style="margin-top:6px;width:100%" onclick="cancelTargeting()">Cancel</button></div>`;
+  function render() {
+    const c=document.getElementById('content'); if(!c) return;
+    if      (activeTab==='battle') c.innerHTML=renderBattle();
+    else if (activeTab==='armies') c.innerHTML=renderArmies();
+    else                           c.innerHTML=renderForts();
   }
 
-  // Rout prompts
-  if (routQueue.length>0&&isGM) {
-    html+=`<div class="rout-prompt"><h3>⚠ Rout Checks</h3>`;
-    for (const rid of routQueue) {
-      const ra=armies.find(a=>a.id===rid); if(!ra) continue;
-      html+=`<div class="rout-army"><span class="rout-army-name">${ra.name}</span><div class="rout-btns"><button class="rout-btn holds" onclick="resolveRout('${rid}','holds')">Holds</button><button class="rout-btn routes" onclick="resolveRout('${rid}','routes')">Routes</button></div></div>`;
+  // ─── Battle ────────────────────────────────────────────────────────
+  function renderBattle() {
+    const sorted=[...armies].sort((a,b)=>(b.initiative||0)-(a.initiative||0));
+    const activeTurn=sorted[currentTurnIdx]||null;
+    let html='';
+
+    // Targeting picker
+    if (targetingMode) {
+      const atk=armies.find(a=>a.id===targetingMode.armyId);
+      const rtLabel = targetingMode.rollType
+        .replace('attack0','Strike').replace('attack1','Strike 2').replace('attack2','Strike 3')
+        .replace('ranged0','Ranged').replace('ranged1','Ranged 2').replace('ranged2','Ranged 3')
+        .replace('maneuver','Maneuver').replace('morale','Morale');
+      html+=`<div class="rout-prompt" style="border-color:#EF9F27;background:#2a2200">
+        <h3 style="color:#EF9F27">🎯 ${atk?.name||''} — ${rtLabel}</h3>`;
+
+      // Army targets — all armies except self
+      for (const t of armies.filter(a=>a.id!==targetingMode.armyId)) {
+        // Players: enemy armies show name only (no HP)
+        const hpText = (isGM || t.friendly) ? ` (${t.hp}/${t.maxHp} HP)` : '';
+        html+=`<div class="rout-army"><span class="rout-army-name">${t.name}${hpText}</span><button class="rout-btn holds" onclick="executeRoll('${targetingMode.armyId}','${t.id}','${targetingMode.rollType}')">Target</button></div>`;
+      }
+
+      // Fortifications — targetable by ALL armies (both sides)
+      if ((targetingMode.rollType.startsWith('ranged')||targetingMode.rollType.startsWith('attack')) && fortifications.length>0) {
+        const liveForts = fortifications.filter(f=>f.hp>0);
+        if (liveForts.length > 0) {
+          html+=`<div style="font-size:10px;color:#9F8FEF;margin:6px 0 3px;letter-spacing:1px">FORTIFICATIONS</div>`;
+          for (const f of liveForts) {
+            html+=`<div class="rout-army"><span class="rout-army-name" style="color:#9F8FEF">🏰 ${f.name} (HP ${f.hp}/${f.maxHp} · AC ${f.ac})</span><button class="rout-btn" style="background:#1a1535;color:#9F8FEF;border:1px solid #7F77DD" onclick="attackFort('${targetingMode.armyId}','${f.id}','${targetingMode.rollType}')">Siege</button></div>`;
+          }
+        }
+      }
+
+      html+=`<button class="btn-secondary" style="margin-top:6px;width:100%" onclick="cancelTargeting()">Cancel</button></div>`;
+    }
+
+    // Rout prompts
+    if (routQueue.length>0&&isGM) {
+      html+=`<div class="rout-prompt"><h3>⚠ Rout Checks</h3>`;
+      for (const rid of routQueue) {
+        const ra=armies.find(a=>a.id===rid); if(!ra) continue;
+        html+=`<div class="rout-army"><span class="rout-army-name">${ra.name}</span><div class="rout-btns"><button class="rout-btn holds" onclick="resolveRout('${rid}','holds')">Holds</button><button class="rout-btn routes" onclick="resolveRout('${rid}','routes')">Routes</button></div></div>`;
+      }
+      html+=`</div>`;
+    }
+
+    // Round bar
+    html+=`<div class="round-bar"><span class="round-label">Round</span><button class="btn-round" onclick="changeRound(-1)">−</button><span class="round-num">${round}</span><button class="btn-round" onclick="changeRound(1)">+</button><button class="btn-next-turn" onclick="nextTurn()">Next ▶</button><button class="btn-end-round" onclick="endRound()">End Round</button></div>`;
+    html+=`<button class="btn-secondary" style="margin-bottom:8px;width:100%" onclick="rollAllInitiative()">🎲 Roll All Initiative</button>`;
+
+    // Terrain
+    const tInfo = TERRAINS[terrain]||TERRAINS.plain;
+    html+=`<div style="background:#1a1a18;border-radius:6px;padding:8px 10px;margin-bottom:8px;border:0.5px solid #333">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <label style="font-size:10px;color:#666;letter-spacing:1px">TERRAIN</label>
+        ${isGM?`<select style="flex:1;padding:3px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px" onchange="setTerrain(this.value)">
+          ${Object.entries(TERRAINS).map(([k,v])=>`<option value="${k}" ${terrain===k?'selected':''}>${v.label}</option>`).join('')}
+        </select>`:`<span style="font-size:12px;color:#D3D1C7">${tInfo.label}</span>`}
+        ${isGM?`<select style="padding:3px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:11px" onchange="setDefender(this.value)">
+          <option value="friendly" ${defenderSide==='friendly'?'selected':''}>Allied defends</option>
+          <option value="enemy" ${defenderSide==='enemy'?'selected':''}>Enemy defends</option>
+        </select>`:''}
+      </div>
+      <div style="font-size:10px;color:#666">${tInfo.desc}</div>
+    </div>`;
+
+    if (sorted.length===0) { html+=`<div class="empty">No armies yet. Place tokens on the board and right-click them to set up army stat cards.</div>`; return html; }
+
+    // Initiative list
+    html+=`<div class="initiative-list">`;
+    for (let i=0;i<sorted.length;i++) {
+      const a=sorted[i];
+      const isActive=activeTurn?.id===a.id;
+      const hpPct=a.maxHp>0?(a.hp/a.maxHp)*100:0;
+      const hpClass=hpPct>50?'':hpPct>25?'bloodied':'critical';
+      const side=a.friendly?'friendly':'enemy';
+      const c=a.conditions||{};
+      let condHtml='';
+      for (const cond of CONDITIONS) {
+        if (c[cond.key]) { const val=cond.hasValue&&c[cond.key]>0?` ${c[cond.key]}`:''; condHtml+=`<span class="cond-badge cond-${cond.key}">${cond.label}${val}</span>`; }
+      }
+      // Players see enemy name only — no HP
+      const displayHp = (isGM || a.friendly) ? `${a.hp}/${a.maxHp} HP` : '';
+      html+=`<div class="init-row ${side} ${isActive?'active-turn':''} ${c.routed?'routed':''} ${a.hp<=0?'defeated':''}"><div class="init-header"><span class="init-name">${isActive?'▶ ':''}${a.name}</span><span class="init-hp ${hpClass}">${displayHp}</span><span class="init-value">${a.initiative||'—'}</span></div>${condHtml?`<div class="init-conditions">${condHtml}</div>`:''}</div>`;
     }
     html+=`</div>`;
-  }
 
-  // Round bar
-  html+=`<div class="round-bar"><span class="round-label">Round</span><button class="btn-round" onclick="changeRound(-1)">−</button><span class="round-num">${round}</span><button class="btn-round" onclick="changeRound(1)">+</button><button class="btn-next-turn" onclick="nextTurn()">Next ▶</button><button class="btn-end-round" onclick="endRound()">End Round</button></div>`;
-  html+=`<button class="btn-secondary" style="margin-bottom:8px;width:100%" onclick="rollAllInitiative()">🎲 Roll All Initiative</button>`;
-
-  // Terrain selector
-  const tInfo = TERRAINS[terrain]||TERRAINS.plain;
-  html+=`<div style="background:#1a1a18;border-radius:6px;padding:8px 10px;margin-bottom:8px;border:0.5px solid #333">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-      <label style="font-size:10px;color:#666;letter-spacing:1px">TERRAIN</label>
-      ${isGM?`<select style="flex:1;padding:3px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px" onchange="setTerrain(this.value)">
-        ${Object.entries(TERRAINS).map(([k,v])=>`<option value="${k}" ${terrain===k?'selected':''}>${v.label}</option>`).join('')}
-      </select>`:`<span style="font-size:12px;color:#D3D1C7">${tInfo.label}</span>`}
-      ${isGM?`<select style="padding:3px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:11px" onchange="setDefender(this.value)">
-        <option value="friendly" ${defenderSide==='friendly'?'selected':''}>Allied defends</option>
-        <option value="enemy" ${defenderSide==='enemy'?'selected':''}>Enemy defends</option>
-      </select>`:''}
-    </div>
-    <div style="font-size:10px;color:#666">${tInfo.desc}</div>
-  </div>`;
-
-  if (sorted.length===0) { html+=`<div class="empty">No armies yet. Place tokens on the board and right-click them to set up army stat cards.</div>`; return html; }
-
-  // Initiative list
-  html+=`<div class="initiative-list">`;
-  for (let i=0;i<sorted.length;i++) {
-    const a=sorted[i];
-    const isActive=activeTurn?.id===a.id;
-    const hpPct=a.maxHp>0?(a.hp/a.maxHp)*100:0;
-    const hpClass=hpPct>50?'':hpPct>25?'bloodied':'critical';
-    const side=a.friendly?'friendly':'enemy';
-    const c=a.conditions||{};
-    let condHtml='';
-    for (const cond of CONDITIONS) {
-      if (c[cond.key]) { const val=cond.hasValue&&c[cond.key]>0?` ${c[cond.key]}`:''; condHtml+=`<span class="cond-badge cond-${cond.key}">${cond.label}${val}</span>`; }
-    }
-    const displayName=a.name; // always show name
-    const displayHp=isGM||a.friendly?`${a.hp}/${a.maxHp} HP`:'';
-    html+=`<div class="init-row ${side} ${isActive?'active-turn':''} ${c.routed?'routed':''} ${a.hp<=0?'defeated':''}"><div class="init-header"><span class="init-name">${isActive?'▶ ':''}${displayName}</span><span class="init-hp ${hpClass}">${displayHp}</span><span class="init-value">${a.initiative||'—'}</span></div>${condHtml?`<div class="init-conditions">${condHtml}</div>`:''}</div>`;
-  }
-  html+=`</div>`;
-
-  // Active army roll buttons
-  if (activeTurn&&(isGM||activeTurn.friendly)) {
-    const s=getModifiedStats(activeTurn);
-    const dis=targetingMode?'disabled':'';
-    const aw=(rt)=>targetingMode?.armyId===activeTurn.id&&targetingMode?.rollType===rt?'awaiting-target':'';
-    const hasRanged=activeTurn.rng>0||activeTurn.maxShots>0;
-    html+=`<div class="army-card" style="margin-top:8px">
-      <div class="army-card-header ${activeTurn.friendly?'friendly':'enemy'}">
-        <span class="army-title">${activeTurn.name}</span>
-        <span style="font-size:10px;color:#666">${activeTurn.hp}/${activeTurn.maxHp} HP</span>
-      </div>
-      <div class="army-card-body">
-        <div class="rolls-section"><div class="rolls-label">ROLLS</div><div class="roll-btns">
-          ${activeTurn.atk>0||s.atk>0?`
-            <button class="roll-btn ${aw('attack0')}" ${dis} onclick="startRoll('${activeTurn.id}','attack0')">Strike (+${s.atk})</button>
-            <button class="roll-btn ${aw('attack1')}" ${dis} onclick="startRoll('${activeTurn.id}','attack1')" style="opacity:0.8">Strike 2 (+${s.atk-5})</button>
-            <button class="roll-btn ${aw('attack2')}" ${dis} onclick="startRoll('${activeTurn.id}','attack2')" style="opacity:0.6">Strike 3 (+${s.atk-10})</button>
-          `:''}
-          ${hasRanged?`
-            <button class="roll-btn ${aw('ranged0')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged0')">Ranged (+${s.rng})${activeTurn.maxShots>0?` [${activeTurn.shots||0}/${activeTurn.maxShots}]`:''}</button>
-            <button class="roll-btn ${aw('ranged1')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged1')" style="opacity:0.8">Ranged 2 (+${s.rng-5})${activeTurn.maxShots>0?` [${activeTurn.shots||0}/${activeTurn.maxShots}]`:''}</button>
-            <button class="roll-btn ${aw('ranged2')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged2')" style="opacity:0.6">Ranged 3 (+${s.rng-10})${activeTurn.maxShots>0?` [${activeTurn.shots||0}/${activeTurn.maxShots}]`:''}</button>
-          `:''}
-          <button class="roll-btn ${aw('maneuver')}" ${dis} onclick="startRoll('${activeTurn.id}','maneuver')">Maneuver (+${s.man})</button>
-          <button class="roll-btn ${aw('morale')}" ${dis} onclick="startRoll('${activeTurn.id}','morale')">Morale (+${s.mor})</button>
-          <button class="roll-btn" onclick="rollScout('${activeTurn.id}')">Scout (+${activeTurn.sct})</button>
-        </div></div>
-        <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
-          <label style="font-size:10px;color:#666">HP</label>
-          <button class="hp-btn" onclick="changeHp('${activeTurn.id}',-1)">−</button>
-          <span style="font-size:14px;font-weight:500;min-width:20px;text-align:center">${activeTurn.hp}</span>
-          <button class="hp-btn" onclick="changeHp('${activeTurn.id}',1)">+</button>
-          <label style="font-size:10px;color:#666;margin-left:8px">Initiative</label>
-          <input type="number" value="${activeTurn.initiative||0}" style="width:54px;padding:3px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px" onchange="setInitiative('${activeTurn.id}',this.value)"/>
-          <button class="rout-btn holds" style="padding:3px 8px" onclick="rollInitiative('${activeTurn.id}')">Roll</button>
+    // Active army roll buttons — only for GM or player's own army
+    if (activeTurn&&(isGM||activeTurn.friendly)) {
+      const s=getModifiedStats(activeTurn);
+      const dis=targetingMode?'disabled':'';
+      const aw=(rt)=>targetingMode?.armyId===activeTurn.id&&targetingMode?.rollType===rt?'awaiting-target':'';
+      const hasRanged=activeTurn.rng>0||activeTurn.maxShots>0;
+      html+=`<div class="army-card" style="margin-top:8px">
+        <div class="army-card-header ${activeTurn.friendly?'friendly':'enemy'}">
+          <span class="army-title">${activeTurn.name}</span>
+          <span style="font-size:10px;color:#666">${activeTurn.hp}/${activeTurn.maxHp} HP</span>
         </div>
-      </div>
-    </div>`;
-  }
-  return html;
-}
-
-// ─── Armies ───────────────────────────────────────────────────────
-function renderArmies() {
-  if (armies.length===0) return `<div class="empty">No armies yet. Place tokens on the board and right-click them.</div>`;
-  let html='';
-  for (const a of armies) {
-    // Players see enemy name only, no stats
-    if (!isGM && !a.friendly) {
-      const sel=a.id===selectedArmyId?'outline:2px solid #EF9F27;border-radius:8px;':'';
-      html+=`<div id="acard-${a.id}" style="${sel}"><div class="army-card"><div class="army-card-header enemy"><span class="army-title">${a.name}</span><span style="font-size:10px;color:#666">Enemy</span></div></div></div>`;
-      continue;
-    }
-    const s=getModifiedStats(a);
-    const c=a.conditions||{};
-    const hpPct=a.maxHp>0?(a.hp/a.maxHp)*100:0;
-    const hpColor=hpPct>50?'#378ADD':hpPct>25?'#EF9F27':'#E24B4A';
-    const side=a.friendly?'friendly':'enemy';
-    let condBtns='';
-    for (const cond of CONDITIONS) {
-      const active=c[cond.key]?'active':'';
-      const val=cond.hasValue&&c[cond.key]>0?`<span class="cond-value">${c[cond.key]}</span>`:'';
-      condBtns+=`<button class="cond-btn ${active} ${cond.key}" onclick="toggleCondition('${a.id}','${cond.key}')">${cond.label}${val}</button>`;
-    }
-    html+=`<div class="army-card">
-      <div class="army-card-header ${side}">
-        <span class="army-title">${a.name}</span>
-        <span style="font-size:10px;color:#666">${a.friendly?'Friendly':'Enemy'}</span>
-        ${isGM?`<button style="font-size:10px;padding:2px 6px;background:#333;border:1px solid #555;border-radius:3px;color:#888;cursor:pointer" onclick="deleteArmy('${a.id}')">✕</button>`:''}
-      </div>
-      <div class="army-card-body">
-        <div class="stats-row">
-          <div class="stat-box"><div class="stat-label">AC</div><div class="stat-value ${s.ac!==a.ac?'modified':''}">${s.ac}</div></div>
-          <div class="stat-box"><div class="stat-label">MAN</div><div class="stat-value ${s.man!==a.man?'modified':''}" >+${s.man}</div></div>
-          <div class="stat-box"><div class="stat-label">MOR</div><div class="stat-value ${s.mor!==a.mor?'modified':''}">+${s.mor}</div></div>
-          <div class="stat-box"><div class="stat-label">SCT</div><div class="stat-value">+${a.sct}</div></div>
-        </div>
-        <div class="hp-row" style="margin-bottom:8px">
-          <span class="hp-label">HP</span>
-          <div class="hp-controls">
-            <button class="hp-btn" onclick="changeHp('${a.id}',-1)">−</button>
-            <span class="hp-display">${a.hp}</span>
-            <span class="hp-max">/ ${a.maxHp} (RT ${a.rt})</span>
-            <button class="hp-btn" onclick="changeHp('${a.id}',1)">+</button>
+        <div class="army-card-body">
+          <div class="rolls-section"><div class="rolls-label">ROLLS</div><div class="roll-btns">
+            ${activeTurn.atk>0||s.atk>0?`
+              <button class="roll-btn ${aw('attack0')}" ${dis} onclick="startRoll('${activeTurn.id}','attack0')">Strike (+${s.atk})</button>
+              <button class="roll-btn ${aw('attack1')}" ${dis} onclick="startRoll('${activeTurn.id}','attack1')" style="opacity:0.8">Strike 2 (+${s.atk-5})</button>
+              <button class="roll-btn ${aw('attack2')}" ${dis} onclick="startRoll('${activeTurn.id}','attack2')" style="opacity:0.6">Strike 3 (+${s.atk-10})</button>
+            `:''}
+            ${hasRanged?`
+              <button class="roll-btn ${aw('ranged0')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged0')">Ranged (+${s.rng})${activeTurn.maxShots>0?` [${activeTurn.shots||0}/${activeTurn.maxShots}]`:''}</button>
+              <button class="roll-btn ${aw('ranged1')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged1')" style="opacity:0.8">Ranged 2 (+${s.rng-5})${activeTurn.maxShots>0?` [${activeTurn.shots||0}/${activeTurn.maxShots}]`:''}</button>
+              <button class="roll-btn ${aw('ranged2')}" ${dis} onclick="startRoll('${activeTurn.id}','ranged2')" style="opacity:0.6">Ranged 3 (+${s.rng-10})${activeTurn.maxShots>0?` [${activeTurn.shots||0}/${activeTurn.maxShots}]`:''}</button>
+            `:''}
+            <button class="roll-btn ${aw('maneuver')}" ${dis} onclick="startRoll('${activeTurn.id}','maneuver')">Maneuver (+${s.man})</button>
+            <button class="roll-btn ${aw('morale')}" ${dis} onclick="startRoll('${activeTurn.id}','morale')">Morale (+${s.mor})</button>
+            <button class="roll-btn" onclick="rollScout('${activeTurn.id}')">Scout (+${activeTurn.sct})</button>
+          </div></div>
+          <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
+            <label style="font-size:10px;color:#666">HP</label>
+            <button class="hp-btn" onclick="changeHp('${activeTurn.id}',-1)">−</button>
+            <span style="font-size:14px;font-weight:500;min-width:20px;text-align:center">${activeTurn.hp}</span>
+            <button class="hp-btn" onclick="changeHp('${activeTurn.id}',1)">+</button>
+            <label style="font-size:10px;color:#666;margin-left:8px">Initiative</label>
+            <input type="number" value="${activeTurn.initiative||0}" style="width:54px;padding:3px 6px;background:#111;border:1px solid #333;border-radius:3px;color:#D3D1C7;font-size:12px" onchange="setInitiative('${activeTurn.id}',this.value)"/>
+            <button class="rout-btn holds" style="padding:3px 8px" onclick="rollInitiative('${activeTurn.id}')">Roll</button>
           </div>
-          <div class="hp-bar-wrap"><div class="hp-bar" style="width:${hpPct}%;background:${hpColor}"></div></div>
         </div>
-        <div class="conds-section"><div class="conds-label">CONDITIONS</div><div class="conds-grid">${condBtns}</div></div>
-      </div>
-    </div>`;
-  }
-  return html;
-}
-
-// ─── Forts ────────────────────────────────────────────────────────
-function renderForts() {
-  let html = '';
-  if (fortifications.length===0) {
-    html+=`<div class="empty">No fortifications.<br>Place a fortification prop on the board and right-click it to set it up.</div>`;
+      </div>`;
+    }
     return html;
   }
-  for (const f of fortifications) {
-    const hpPct = f.maxHp>0?(f.hp/f.maxHp)*100:0;
-    const hpColor = hpPct>50?'#7F77DD':hpPct>25?'#EF9F27':'#E24B4A';
-    const damaged = f.hp<=Math.floor(f.maxHp/2)&&f.hp>0;
-    const destroyed = f.hp===0;
-    html+=`<div class="army-card" style="border-left:2px solid #7F77DD">
-      <div class="army-card-header" style="border-top:2px solid #7F77DD;background:#1a1535">
-        <span class="army-title">🏰 ${f.name}</span>
-        <span style="font-size:10px;color:#9F8FEF">${FORT_TYPES[f.type]?.label||f.type}</span>
-        ${damaged?`<span style="font-size:10px;color:#EF9F27;margin-left:4px">⚠ Damaged</span>`:''}
-        ${destroyed?`<span style="font-size:10px;color:#E24B4A;margin-left:4px">✕ Destroyed</span>`:''}
-        ${isGM?`<button style="font-size:10px;padding:2px 6px;background:#333;border:1px solid #555;border-radius:3px;color:#888;cursor:pointer;margin-left:auto" onclick="deleteFort('${f.id}')">✕</button>`:''}
-      </div>
-      <div class="army-card-body">
-        <div class="stats-row">
-          <div class="stat-box"><div class="stat-label">AC</div><div class="stat-value">${f.ac}</div></div>
-          <div class="stat-box"><div class="stat-label">HP</div><div class="stat-value">${f.hp}/${f.maxHp}</div></div>
-        </div>
-        <div class="hp-row" style="margin-top:4px">
-          <span class="hp-label">HP</span>
-          <div class="hp-controls">
-            ${isGM?`<button class="hp-btn" onclick="changeFortHp('${f.id}',-1)">−</button>`:''}
-            <span class="hp-display">${f.hp}</span>
-            <span class="hp-max">/ ${f.maxHp}</span>
-            ${isGM?`<button class="hp-btn" onclick="changeFortHp('${f.id}',1)">+</button>`:''}
-          </div>
-          <div class="hp-bar-wrap"><div class="hp-bar" style="width:${hpPct}%;background:${hpColor}"></div></div>
-        </div>
-      </div>
-    </div>`;
-  }
-  return html;
-}
 
-// ─── Handlers ─────────────────────────────────────────────────────
-window.changeRound = async (d) => { round=Math.max(1,round+d); await saveData(); render(); };
-window.nextTurn = async () => {
-  const sorted=[...armies].sort((a,b)=>(b.initiative||0)-(a.initiative||0));
-  if (!sorted.length) return;
-  currentTurnIdx=(currentTurnIdx+1)%sorted.length;
-  await saveData(); render();
-};
-window.endRound = async () => {
-  routQueue=armies.filter(a=>a.hp>0&&a.hp<=a.rt&&!a.conditions?.routed).map(a=>a.id);
-  round++; currentTurnIdx=0; await saveData(); render();
-};
-window.resolveRout = async (armyId,result) => {
-  routQueue=routQueue.filter(id=>id!==armyId);
-  if (result==='routes') { const a=armies.find(x=>x.id===armyId); if(a){a.conditions=a.conditions||{};a.conditions.routed=true;a.conditions.shaken=Math.min(4,(a.conditions.shaken||0)+1);} }
-  await saveData(); render();
-};
-window.rollAllInitiative = async () => {
-  for(const a of armies) a.initiative=Math.floor(Math.random()*20)+1+a.sct;
-  currentTurnIdx=0; await saveData(); render();
-};
-window.rollInitiative = async (armyId) => {
-  const a=armies.find(x=>x.id===armyId); if(a){a.initiative=Math.floor(Math.random()*20)+1+a.sct; await saveData(); render();}
-};
-window.setInitiative = async (armyId,val) => {
-  const a=armies.find(x=>x.id===armyId); if(a){a.initiative=parseFloat(val)||0; await saveData();}
-};
-window.changeHp = async (armyId,delta) => {
-  const a=armies.find(x=>x.id===armyId); if(!a) return;
-  a.hp=Math.max(0,Math.min(a.maxHp,a.hp+delta));
-  if(a.hp===0) OBR.notification.show(`${a.name} is Defeated!`,'WARNING');
-  await saveData(); render();
-};
-window.toggleCondition = async (armyId,condKey) => {
-  const a=armies.find(x=>x.id===armyId); if(!a) return;
-  a.conditions=a.conditions||{}; const cond=CONDITIONS.find(c=>c.key===condKey);
-  if (cond?.hasValue) { a.conditions[condKey]=((a.conditions[condKey]||0)+1)%(cond.max+1); if(!a.conditions[condKey]) delete a.conditions[condKey]; }
-  else { if(a.conditions[condKey]) delete a.conditions[condKey]; else a.conditions[condKey]=true; }
-  if (condKey==='shaken'&&(a.conditions.shaken||0)>=4) { a.conditions.routed=true; OBR.notification.show(`${a.name} is Routed!`,'WARNING'); }
-  if (condKey==='pinned'&&a.conditions.pinned) a.conditions.outflanked=true;
-  await saveData(); render();
-};
-window.startRoll = async (armyId,rollType) => {
-  if (targetingMode?.armyId===armyId&&targetingMode?.rollType===rollType) { targetingMode=null; await saveData(); render(); return; }
-  targetingMode={armyId,rollType}; await saveData(); render();
-};
-window.executeRoll = async (attackerId,targetId,rollType) => {
-  await resolveRoll(attackerId,targetId,rollType); targetingMode=null; await saveData(); render();
-};
-window.cancelTargeting = async () => { targetingMode=null; await saveData(); render(); };
-
-window.attackFort = async (attackerId, fortId, rollType) => {
-  const atk=armies.find(a=>a.id===attackerId);
-  const fort=fortifications.find(f=>f.id===fortId);
-  if (!atk||!fort) return;
-  const as=getModifiedStats(atk);
-  const isRanged=rollType.startsWith('ranged');
-  const mapNum=parseInt(rollType.slice(-1))||0;
-  const map=mapNum===0?0:mapNum===1?-5:-10;
-  if (isRanged&&(atk.shots||0)<=0) { showResult('No shots remaining!',null); return; }
-  if (isRanged) atk.shots=Math.max(0,(atk.shots||0)-1);
-  const roll=Math.floor(Math.random()*20)+1;
-  const modifier=(isRanged?as.rng:as.atk)+map;
-  const total=roll+modifier;
-  const degree=getDegree(roll,total,fort.ac);
-  let outcome='';
-  if (degree==='crit-success') { fort.hp=Math.max(0,fort.hp-2); outcome=`Crit Hit! ${fort.name} −2 HP (${fort.hp}/${fort.maxHp})`; }
-  else if (degree==='success') { fort.hp=Math.max(0,fort.hp-1); outcome=`Hit! ${fort.name} −1 HP (${fort.hp}/${fort.maxHp})`; }
-  else if (degree==='failure') outcome='Miss.';
-  else outcome='Critical Miss!';
-  if (fort.hp===0) outcome+=` · ${fort.name} DESTROYED`;
-  else if (fort.hp<=Math.floor(fort.maxHp/2)) outcome+=` · ⚠ Damaged`;
-  showResult(`${total}`,degree,`d20(${roll}) +${modifier} vs Fort AC ${fort.ac}`,outcome);
-  OBR.notification.show(`${atk.name} attacks ${fort.name}: ${total} — ${outcome}`,['crit-success','success'].includes(degree)?'INFO':'WARNING');
-  targetingMode=null; await saveData(); render();
-};
-window.setTerrain = async (t) => {
-  terrain = t;
-  // Apply swamp mired conditions at battle start
-  if (t === 'swamp') {
+  // ─── Armies ────────────────────────────────────────────────────────
+  function renderArmies() {
+    if (armies.length===0) return `<div class="empty">No armies yet. Place tokens on the board and right-click them.</div>`;
+    let html='';
     for (const a of armies) {
-      a.conditions = a.conditions || {};
-      if (a.type === 'Cavalry') a.conditions.mired = Math.max(a.conditions.mired||0, 2);
-      else a.conditions.mired = Math.max(a.conditions.mired||0, 1);
+      // Players see enemy name only, no stats
+      if (!isGM && !a.friendly) {
+        html+=`<div class="army-card"><div class="army-card-header enemy"><span class="army-title">${a.name}</span><span style="font-size:10px;color:#E24B4A">Enemy</span></div></div>`;
+        continue;
+      }
+      const s=getModifiedStats(a);
+      const c=a.conditions||{};
+      const hpPct=a.maxHp>0?(a.hp/a.maxHp)*100:0;
+      const hpColor=hpPct>50?'#378ADD':hpPct>25?'#EF9F27':'#E24B4A';
+      const side=a.friendly?'friendly':'enemy';
+      let condBtns='';
+      for (const cond of CONDITIONS) {
+        const active=c[cond.key]?'active':'';
+        const val=cond.hasValue&&c[cond.key]>0?`<span class="cond-value">${c[cond.key]}</span>`:'';
+        condBtns+=`<button class="cond-btn ${active} ${cond.key}" onclick="toggleCondition('${a.id}','${cond.key}')">${cond.label}${val}</button>`;
+      }
+      html+=`<div class="army-card">
+        <div class="army-card-header ${side}">
+          <span class="army-title">${a.name}</span>
+          <span style="font-size:10px;color:#666">${a.friendly?'Friendly':'Enemy'}</span>
+          ${isGM?`<button style="font-size:10px;padding:2px 6px;background:#333;border:1px solid #555;border-radius:3px;color:#888;cursor:pointer" onclick="deleteArmy('${a.id}')">✕</button>`:''}
+        </div>
+        <div class="army-card-body">
+          <div class="stats-row">
+            <div class="stat-box"><div class="stat-label">AC</div><div class="stat-value ${s.ac!==a.ac?'modified':''}">${s.ac}</div></div>
+            <div class="stat-box"><div class="stat-label">MAN</div><div class="stat-value ${s.man!==a.man?'modified':''}">+${s.man}</div></div>
+            <div class="stat-box"><div class="stat-label">MOR</div><div class="stat-value ${s.mor!==a.mor?'modified':''}">+${s.mor}</div></div>
+            <div class="stat-box"><div class="stat-label">SCT</div><div class="stat-value">+${a.sct}</div></div>
+          </div>
+          <div class="hp-row" style="margin-bottom:8px">
+            <span class="hp-label">HP</span>
+            <div class="hp-controls">
+              <button class="hp-btn" onclick="changeHp('${a.id}',-1)">−</button>
+              <span class="hp-display">${a.hp}</span>
+              <span class="hp-max">/ ${a.maxHp} (RT ${a.rt})</span>
+              <button class="hp-btn" onclick="changeHp('${a.id}',1)">+</button>
+            </div>
+            <div class="hp-bar-wrap"><div class="hp-bar" style="width:${hpPct}%;background:${hpColor}"></div></div>
+          </div>
+          <div class="conds-section"><div class="conds-label">CONDITIONS</div><div class="conds-grid">${condBtns}</div></div>
+        </div>
+      </div>`;
     }
-    OBR.notification.show('Swamp terrain: all armies gain Mired 1 (Cavalry Mired 2)', 'WARNING');
+    return html;
   }
-  await saveData(); render();
-};
 
-window.setDefender = async (side) => { defenderSide = side; await saveData(); render(); };
+  // ─── Forts ─────────────────────────────────────────────────────────
+  function renderForts() {
+    let html = '';
+    if (fortifications.length===0) {
+      html+=`<div class="empty">No fortifications.<br>Place a fortification prop on the board and right-click it to set it up.</div>`;
+      return html;
+    }
+    for (const f of fortifications) {
+      const hpPct = f.maxHp>0?(f.hp/f.maxHp)*100:0;
+      const hpColor = hpPct>50?'#7F77DD':hpPct>25?'#EF9F27':'#E24B4A';
+      const damaged = f.hp<=Math.floor(f.maxHp/2)&&f.hp>0;
+      const destroyed = f.hp===0;
+      html+=`<div class="army-card" style="border-left:2px solid #7F77DD">
+        <div class="army-card-header" style="border-top:2px solid #7F77DD;background:#1a1535">
+          <span class="army-title">🏰 ${f.name}</span>
+          <span style="font-size:10px;color:#9F8FEF">${FORT_TYPES[f.type]?.label||f.type}</span>
+          ${damaged?`<span style="font-size:10px;color:#EF9F27;margin-left:4px">⚠ Damaged</span>`:''}
+          ${destroyed?`<span style="font-size:10px;color:#E24B4A;margin-left:4px">✕ Destroyed</span>`:''}
+          ${isGM?`<button style="font-size:10px;padding:2px 6px;background:#333;border:1px solid #555;border-radius:3px;color:#888;cursor:pointer;margin-left:auto" onclick="deleteFort('${f.id}')">✕</button>`:''}
+        </div>
+        <div class="army-card-body">
+          <div class="stats-row">
+            <div class="stat-box"><div class="stat-label">AC</div><div class="stat-value">${f.ac}</div></div>
+            <div class="stat-box"><div class="stat-label">HP</div><div class="stat-value">${f.hp}/${f.maxHp}</div></div>
+          </div>
+          <div class="hp-row" style="margin-top:4px">
+            <span class="hp-label">HP</span>
+            <div class="hp-controls">
+              ${isGM?`<button class="hp-btn" onclick="changeFortHp('${f.id}',-1)">−</button>`:''}
+              <span class="hp-display">${f.hp}</span>
+              <span class="hp-max">/ ${f.maxHp}</span>
+              ${isGM?`<button class="hp-btn" onclick="changeFortHp('${f.id}',1)">+</button>`:''}
+            </div>
+            <div class="hp-bar-wrap"><div class="hp-bar" style="width:${hpPct}%;background:${hpColor}"></div></div>
+          </div>
+        </div>
+      </div>`;
+    }
+    return html;
+  }
 
-window.rollScout = async (armyId) => {
-  const a=armies.find(x=>x.id===armyId); if(!a) return;
-  const roll=Math.floor(Math.random()*20)+1;
-  showResult(`Scout: ${roll+a.sct}`,null,`d20(${roll}) + ${a.sct}`);
-};
-window.deleteArmy = async (armyId) => {
-  const a = armies.find(x=>x.id===armyId);
-  if (a?.tokenId) removeNameTag(a.tokenId);
-  armies=armies.filter(x=>x.id!==armyId);
-  for (const f of fortifications) f.garrisonedArmies=(f.garrisonedArmies||[]).filter(id=>id!==armyId);
-  await saveData(); render();
-};
-window.deleteFort = async (fortId) => { fortifications=fortifications.filter(f=>f.id!==fortId); await saveData(); render(); };
-window.changeFortHp = async (fortId, delta) => {
-  const f=fortifications.find(x=>x.id===fortId); if(!f) return;
-  f.hp=Math.max(0,Math.min(f.maxHp,f.hp+delta));
-  if (f.hp===0) OBR.notification.show(`${f.name} destroyed!`,'ERROR');
-  await saveData(); render();
-};
+  // ─── Handlers ──────────────────────────────────────────────────────
+  window.changeRound = async (d) => { round=Math.max(1,round+d); await saveData(); render(); };
+  window.nextTurn = async () => {
+    const sorted=[...armies].sort((a,b)=>(b.initiative||0)-(a.initiative||0));
+    if (!sorted.length) return;
+    currentTurnIdx=(currentTurnIdx+1)%sorted.length;
+    await saveData(); render();
+  };
+  window.endRound = async () => {
+    routQueue=armies.filter(a=>a.hp>0&&a.hp<=a.rt&&!a.conditions?.routed).map(a=>a.id);
+    round++; currentTurnIdx=0; await saveData(); render();
+  };
+  window.resolveRout = async (armyId,result) => {
+    routQueue=routQueue.filter(id=>id!==armyId);
+    if (result==='routes') { const a=armies.find(x=>x.id===armyId); if(a){a.conditions=a.conditions||{};a.conditions.routed=true;a.conditions.shaken=Math.min(4,(a.conditions.shaken||0)+1);} }
+    await saveData(); render();
+  };
+  window.rollAllInitiative = async () => {
+    for(const a of armies) a.initiative=Math.floor(Math.random()*20)+1+a.sct;
+    currentTurnIdx=0; await saveData(); render();
+  };
+  window.rollInitiative = async (armyId) => {
+    const a=armies.find(x=>x.id===armyId); if(a){a.initiative=Math.floor(Math.random()*20)+1+a.sct; await saveData(); render();}
+  };
+  window.setInitiative = async (armyId,val) => {
+    const a=armies.find(x=>x.id===armyId); if(a){a.initiative=parseFloat(val)||0; await saveData();}
+  };
+  window.changeHp = async (armyId,delta) => {
+    const a=armies.find(x=>x.id===armyId); if(!a) return;
+    a.hp=Math.max(0,Math.min(a.maxHp,a.hp+delta));
+    if(a.hp===0) OBR.notification.show(`${a.name} is Defeated!`,'WARNING');
+    await saveData(); render();
+  };
+  window.toggleCondition = async (armyId,condKey) => {
+    const a=armies.find(x=>x.id===armyId); if(!a) return;
+    a.conditions=a.conditions||{}; const cond=CONDITIONS.find(c=>c.key===condKey);
+    if (cond?.hasValue) { a.conditions[condKey]=((a.conditions[condKey]||0)+1)%(cond.max+1); if(!a.conditions[condKey]) delete a.conditions[condKey]; }
+    else { if(a.conditions[condKey]) delete a.conditions[condKey]; else a.conditions[condKey]=true; }
+    if (condKey==='shaken'&&(a.conditions.shaken||0)>=4) { a.conditions.routed=true; OBR.notification.show(`${a.name} is Routed!`,'WARNING'); }
+    if (condKey==='pinned'&&a.conditions.pinned) a.conditions.outflanked=true;
+    await saveData(); render();
+  };
+  window.startRoll = async (armyId,rollType) => {
+    if (targetingMode?.armyId===armyId&&targetingMode?.rollType===rollType) { targetingMode=null; await saveData(); render(); return; }
+    targetingMode={armyId,rollType}; await saveData(); render();
+  };
+  window.executeRoll = async (attackerId,targetId,rollType) => {
+    await resolveRoll(attackerId,targetId,rollType); targetingMode=null; await saveData(); render();
+  };
+  window.cancelTargeting = async () => { targetingMode=null; await saveData(); render(); };
 
-// ─── Roll resolution ──────────────────────────────────────────────
-async function resolveRoll(attackerId,targetId,rollType) {
-  const atk=armies.find(a=>a.id===attackerId); const tgt=armies.find(a=>a.id===targetId);
-  if (!atk||!tgt) return;
-  const as=getModifiedStats(atk); const ts=getModifiedStats(tgt);
-  const roll=Math.floor(Math.random()*20)+1;
-  let modifier,dc,label,detail;
-  if (rollType.startsWith('attack')||rollType.startsWith('ranged')) {
-    const isRanged = rollType.startsWith('ranged');
-    const mapNum = parseInt(rollType.slice(-1))||0;
-    const map = mapNum===0?0:mapNum===1?-5:-10;
-    const terrainMod = getTerrainMods(atk, rollType);
-    const terrainAcMod = isRanged ? getTerrainAcMod(tgt) : 0;
-    modifier=(isRanged?as.rng:as.atk)+map+terrainMod; dc=ts.ac+terrainAcMod;
-    label=isRanged?'Ranged':'Attack';
-    const modParts=[map!==0?`MAP ${map}`:'', terrainMod!==0?`terrain ${terrainMod>0?'+':''}${terrainMod}`:'', terrainAcMod!==0?`tgt AC +${terrainAcMod}`:''].filter(Boolean).join(', ');
-    detail=`vs AC ${dc}${modParts?` (${modParts})`:''}`;
-    if (isRanged) { if((atk.shots||0)<=0){showResult('No shots remaining!',null);return;} atk.shots=Math.max(0,(atk.shots||0)-1); }
-  } else if (rollType==='maneuver') { const tm=getTerrainMods(atk,'maneuver'); modifier=as.man+tm; dc=ts.manDC; label='Maneuver'; detail=`vs MAN DC ${dc}${tm!==0?` (terrain ${tm>0?'+':''}${tm})`:''}`;}
-  else if (rollType==='morale') { const tm=getTerrainMods(atk,'morale'); modifier=as.mor+tm; dc=ts.morDC; label='Morale'; detail=`vs MOR DC ${dc}${tm!==0?` (terrain ${tm>0?'+':''}${tm})`:''}`;}
-  const total=roll+modifier; const degree=getDegree(roll,total,dc); let outcome='';
-  if (rollType==='attack'||rollType==='ranged') {
-    if (degree==='crit-success') { tgt.hp=Math.max(0,tgt.hp-2); outcome=`Crit Hit! ${tgt.name} −2 HP (${tgt.hp}/${tgt.maxHp})`; tgt.conditions=tgt.conditions||{}; if(Math.floor(Math.random()*20)+1<=10){tgt.conditions.shaken=Math.min(4,(tgt.conditions.shaken||0)+1);outcome+=` · Shaken ${tgt.conditions.shaken}`;} }
-    else if (degree==='success') { tgt.hp=Math.max(0,tgt.hp-1); outcome=`Hit! ${tgt.name} −1 HP (${tgt.hp}/${tgt.maxHp})`; }
+  window.attackFort = async (attackerId, fortId, rollType) => {
+    const atk=armies.find(a=>a.id===attackerId);
+    const fort=fortifications.find(f=>f.id===fortId);
+    if (!atk||!fort) return;
+    const as=getModifiedStats(atk);
+    const isRanged=rollType.startsWith('ranged');
+    const mapNum=parseInt(rollType.slice(-1))||0;
+    const map=mapNum===0?0:mapNum===1?-5:-10;
+    if (isRanged&&(atk.shots||0)<=0) { showResult('No shots remaining!',null); return; }
+    if (isRanged) atk.shots=Math.max(0,(atk.shots||0)-1);
+    const roll=Math.floor(Math.random()*20)+1;
+    const modifier=(isRanged?as.rng:as.atk)+map;
+    const total=roll+modifier;
+    const degree=getDegree(roll,total,fort.ac);
+    let outcome='';
+    if (degree==='crit-success') { fort.hp=Math.max(0,fort.hp-2); outcome=`Crit Hit! ${fort.name} −2 HP (${fort.hp}/${fort.maxHp})`; }
+    else if (degree==='success') { fort.hp=Math.max(0,fort.hp-1); outcome=`Hit! ${fort.name} −1 HP (${fort.hp}/${fort.maxHp})`; }
     else if (degree==='failure') outcome='Miss.';
     else outcome='Critical Miss!';
-    if (tgt.hp===0) outcome+=` · ${tgt.name} DEFEATED`;
-  } else if (rollType==='maneuver') {
-    if (degree==='crit-success') outcome='Crit Success';
-    else if (degree==='success') outcome='Success';
-    else if (degree==='failure') outcome='Failure';
-    else { outcome='Crit Fail — Mired 1'; atk.conditions=atk.conditions||{}; atk.conditions.mired=Math.min(4,(atk.conditions.mired||0)+1); }
-  } else if (rollType==='morale') {
-    if (degree==='crit-success') outcome='Crit Success';
-    else if (degree==='success') outcome='Success';
-    else if (degree==='failure') { outcome='Failure — Shaken +1'; tgt.conditions=tgt.conditions||{}; tgt.conditions.shaken=Math.min(4,(tgt.conditions.shaken||0)+1); }
-    else { outcome='Crit Fail — Shaken +2'; tgt.conditions=tgt.conditions||{}; tgt.conditions.shaken=Math.min(4,(tgt.conditions.shaken||0)+2); }
-    if ((tgt.conditions?.shaken||0)>=4) { tgt.conditions.routed=true; outcome+=' · ROUTED'; }
+    if (fort.hp===0) outcome+=` · ${fort.name} DESTROYED`;
+    else if (fort.hp<=Math.floor(fort.maxHp/2)) outcome+=` · ⚠ Damaged`;
+    showResult(`${total}`,degree,`d20(${roll}) +${modifier} vs Fort AC ${fort.ac}`,outcome);
+    OBR.notification.show(`${atk.name} attacks ${fort.name}: ${total} — ${outcome}`,['crit-success','success'].includes(degree)?'INFO':'WARNING');
+    targetingMode=null; await saveData(); render();
+  };
+
+  window.setTerrain = async (t) => {
+    terrain = t;
+    if (t === 'swamp') {
+      for (const a of armies) {
+        a.conditions = a.conditions || {};
+        if (a.type === 'Cavalry') a.conditions.mired = Math.max(a.conditions.mired||0, 2);
+        else a.conditions.mired = Math.max(a.conditions.mired||0, 1);
+      }
+      OBR.notification.show('Swamp terrain: all armies gain Mired 1 (Cavalry Mired 2)', 'WARNING');
+    }
+    await saveData(); render();
+  };
+  window.setDefender = async (side) => { defenderSide = side; await saveData(); render(); };
+  window.rollScout = async (armyId) => {
+    const a=armies.find(x=>x.id===armyId); if(!a) return;
+    const roll=Math.floor(Math.random()*20)+1;
+    showResult(`Scout: ${roll+a.sct}`,null,`d20(${roll}) + ${a.sct}`);
+  };
+  window.deleteArmy = async (armyId) => {
+    const a = armies.find(x=>x.id===armyId);
+    if (a?.tokenId) removeNameTag(a.tokenId);
+    armies=armies.filter(x=>x.id!==armyId);
+    for (const f of fortifications) f.garrisonedArmies=(f.garrisonedArmies||[]).filter(id=>id!==armyId);
+    await saveData(); render();
+  };
+  window.deleteFort = async (fortId) => { fortifications=fortifications.filter(f=>f.id!==fortId); await saveData(); render(); };
+  window.changeFortHp = async (fortId, delta) => {
+    const f=fortifications.find(x=>x.id===fortId); if(!f) return;
+    f.hp=Math.max(0,Math.min(f.maxHp,f.hp+delta));
+    if (f.hp===0) OBR.notification.show(`${f.name} destroyed!`,'ERROR');
+    await saveData(); render();
+  };
+
+  // ─── Roll resolution ───────────────────────────────────────────────
+  async function resolveRoll(attackerId,targetId,rollType) {
+    const atk=armies.find(a=>a.id===attackerId); const tgt=armies.find(a=>a.id===targetId);
+    if (!atk||!tgt) return;
+    const as=getModifiedStats(atk); const ts=getModifiedStats(tgt);
+    const roll=Math.floor(Math.random()*20)+1;
+    let modifier,dc,label,detail;
+    if (rollType.startsWith('attack')||rollType.startsWith('ranged')) {
+      const isRanged = rollType.startsWith('ranged');
+      const mapNum = parseInt(rollType.slice(-1))||0;
+      const map = mapNum===0?0:mapNum===1?-5:-10;
+      const terrainMod = getTerrainMods(atk, rollType);
+      const terrainAcMod = isRanged ? getTerrainAcMod(tgt) : 0;
+      modifier=(isRanged?as.rng:as.atk)+map+terrainMod; dc=ts.ac+terrainAcMod;
+      label=isRanged?'Ranged':'Attack';
+      const modParts=[map!==0?`MAP ${map}`:'', terrainMod!==0?`terrain ${terrainMod>0?'+':''}${terrainMod}`:'', terrainAcMod!==0?`tgt AC +${terrainAcMod}`:''].filter(Boolean).join(', ');
+      detail=`vs AC ${dc}${modParts?` (${modParts})`:''}`; 
+      if (isRanged) { if((atk.shots||0)<=0){showResult('No shots remaining!',null);return;} atk.shots=Math.max(0,(atk.shots||0)-1); }
+    } else if (rollType==='maneuver') {
+      const tm=getTerrainMods(atk,'maneuver'); modifier=as.man+tm; dc=ts.manDC; label='Maneuver'; detail=`vs MAN DC ${dc}${tm!==0?` (terrain ${tm>0?'+':''}${tm})`:''}`;
+    } else if (rollType==='morale') {
+      const tm=getTerrainMods(atk,'morale'); modifier=as.mor+tm; dc=ts.morDC; label='Morale'; detail=`vs MOR DC ${dc}${tm!==0?` (terrain ${tm>0?'+':''}${tm})`:''}`;
+    }
+    const total=roll+modifier; const degree=getDegree(roll,total,dc); let outcome='';
+    if (rollType.startsWith('attack')||rollType.startsWith('ranged')) {
+      if (degree==='crit-success') { tgt.hp=Math.max(0,tgt.hp-2); outcome=`Crit Hit! ${tgt.name} −2 HP (${tgt.hp}/${tgt.maxHp})`; tgt.conditions=tgt.conditions||{}; if(Math.floor(Math.random()*20)+1<=10){tgt.conditions.shaken=Math.min(4,(tgt.conditions.shaken||0)+1);outcome+=` · Shaken ${tgt.conditions.shaken}`;} }
+      else if (degree==='success') { tgt.hp=Math.max(0,tgt.hp-1); outcome=`Hit! ${tgt.name} −1 HP (${tgt.hp}/${tgt.maxHp})`; }
+      else if (degree==='failure') outcome='Miss.';
+      else outcome='Critical Miss!';
+      if (tgt.hp===0) outcome+=` · ${tgt.name} DEFEATED`;
+    } else if (rollType==='maneuver') {
+      if (degree==='crit-success') outcome='Crit Success';
+      else if (degree==='success') outcome='Success';
+      else if (degree==='failure') outcome='Failure';
+      else { outcome='Crit Fail — Mired 1'; atk.conditions=atk.conditions||{}; atk.conditions.mired=Math.min(4,(atk.conditions.mired||0)+1); }
+    } else if (rollType==='morale') {
+      if (degree==='crit-success') outcome='Crit Success';
+      else if (degree==='success') outcome='Success';
+      else if (degree==='failure') { outcome='Failure — Shaken +1'; tgt.conditions=tgt.conditions||{}; tgt.conditions.shaken=Math.min(4,(tgt.conditions.shaken||0)+1); }
+      else { outcome='Crit Fail — Shaken +2'; tgt.conditions=tgt.conditions||{}; tgt.conditions.shaken=Math.min(4,(tgt.conditions.shaken||0)+2); }
+      if ((tgt.conditions?.shaken||0)>=4) { tgt.conditions.routed=true; outcome+=' · ROUTED'; }
+    }
+    showResult(`${total}`,degree,`d20(${roll}) +${modifier} ${detail}`,outcome);
+    OBR.notification.show(`${atk.name} ${label}: ${total} — ${outcome}`,['crit-success','success'].includes(degree)?'INFO':'WARNING');
+    await saveData(); render();
   }
-  showResult(`${total}`,degree,`d20(${roll}) +${modifier} ${detail}`,outcome);
-  OBR.notification.show(`${atk.name} ${label}: ${total} — ${outcome}`,['crit-success','success'].includes(degree)?'INFO':'WARNING');
-  await saveData(); render();
-}
 
-function getDegree(roll,total,dc) {
-  let d;
-  if (total>=dc+10) d='crit-success'; else if (total>=dc) d='success';
-  else if (total<=dc-10) d='crit-fail'; else d='failure';
-  if (roll===20&&d==='success') d='crit-success'; if (roll===20&&d==='failure') d='success';
-  if (roll===1&&d==='crit-success') d='success'; if (roll===1&&d==='success') d='failure';
-  return d;
-}
+  function getDegree(roll,total,dc) {
+    let d;
+    if (total>=dc+10) d='crit-success'; else if (total>=dc) d='success';
+    else if (total<=dc-10) d='crit-fail'; else d='failure';
+    if (roll===20&&d==='success') d='crit-success'; if (roll===20&&d==='failure') d='success';
+    if (roll===1&&d==='crit-success') d='success'; if (roll===1&&d==='success') d='failure';
+    return d;
+  }
 
-function showResult(title,degree,detail,outcome) {
-  document.querySelector('.roll-result')?.remove(); clearTimeout(resultTimeout);
-  const div=document.createElement('div'); div.className='roll-result';
-  const labels={'crit-success':'Critical Success','success':'Success','failure':'Failure','crit-fail':'Critical Failure'};
-  div.innerHTML=`<div class="result-title">${title}</div>${degree?`<div class="result-dice ${degree}">${labels[degree]||''}</div>`:''}${detail?`<div class="result-detail">${detail}</div>`:''}${outcome?`<div class="result-outcome">${outcome}</div>`:''}`;
-  document.body.appendChild(div);
-  resultTimeout=setTimeout(()=>div.remove(),5000);
-}
+  function showResult(title,degree,detail,outcome) {
+    document.querySelector('.roll-result')?.remove(); clearTimeout(resultTimeout);
+    const div=document.createElement('div'); div.className='roll-result';
+    const labels={'crit-success':'Critical Success','success':'Success','failure':'Failure','crit-fail':'Critical Failure'};
+    div.innerHTML=`<div class="result-title">${title}</div>${degree?`<div class="result-dice ${degree}">${labels[degree]||''}</div>`:''}${detail?`<div class="result-detail">${detail}</div>`:''}${outcome?`<div class="result-outcome">${outcome}</div>`:''}`;
+    document.body.appendChild(div);
+    resultTimeout=setTimeout(()=>div.remove(),5000);
+  }
+
+} // end runApp
 
 })();
 </script>
