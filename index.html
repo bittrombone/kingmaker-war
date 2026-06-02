@@ -288,17 +288,17 @@ async function updateNameTags() {
       );
       if (existingTags.length > 0) await OBR.scene.items.deleteItems(existingTags.map(t=>t.id));
 
-      // Use a fixed-width box and offset x by half so text centers over the token
-      const boxWidth = grid * 3;
-      const halfBox  = boxWidth / 2;
+      // Fixed pixel width centered over token: offset x left by half
+      const boxW = 200;
 
       // Name tag — above token
       const nameTag = buildText()
         .name(`kw-name-${army.tokenId}`)
         .plainText(army.name)
-        .position({ x: token.position.x - halfBox, y: token.position.y - grid * 0.85 })
+        .position({ x: token.position.x - boxW / 2, y: token.position.y - grid * 0.85 })
         .layer('TEXT').locked(true).visible(true).textType('PLAIN')
-        .fontSize(22).fontWeight(700).textAlign('CENTER').width(boxWidth)
+        .width(boxW)
+        .fontSize(22).fontWeight(700).textAlign('CENTER')
         .fillColor(nameColor).strokeColor('#111110').strokeWidth(4)
         .attachedTo(army.tokenId)
         .metadata({ [NAME_TAG_KEY]: army.tokenId })
@@ -309,9 +309,10 @@ async function updateNameTags() {
       const hpTag = buildText()
         .name(`kw-hp-${army.tokenId}`)
         .plainText(`${army.hp} / ${army.maxHp}`)
-        .position({ x: token.position.x - halfBox, y: token.position.y + grid * 0.65 })
+        .position({ x: token.position.x - boxW / 2, y: token.position.y + grid * 0.65 })
         .layer('TEXT').locked(true).visible(true).textType('PLAIN')
-        .fontSize(20).fontWeight(700).textAlign('CENTER').width(boxWidth)
+        .width(boxW)
+        .fontSize(20).fontWeight(700).textAlign('CENTER')
         .fillColor(hpColor).strokeColor('#111110').strokeWidth(4)
         .attachedTo(army.tokenId)
         .metadata({ [HP_TAG_KEY]: army.tokenId })
