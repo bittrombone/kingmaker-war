@@ -290,23 +290,29 @@ async function updateNameTags() {
 
       // Name tag — above token
       const nameTag = buildText()
+        .name(`kw-name-${army.tokenId}`)
         .plainText(army.name)
-        .position({ x: token.position.x, y: token.position.y - grid * 0.6 })
+        .position({ x: token.position.x, y: token.position.y - grid * 0.65 })
         .layer('TEXT').locked(true).visible(true).textType('PLAIN')
         .fontSize(16).fontWeight(600).textAlign('CENTER')
         .fillColor(nameColor).strokeColor('#111110').strokeWidth(3)
-        .attachedTo(army.tokenId).metadata({ [NAME_TAG_KEY]: army.tokenId }).build();
+        .attachedTo(army.tokenId)
+        .metadata({ [NAME_TAG_KEY]: army.tokenId })
+        .build();
+      await OBR.scene.items.addItems([nameTag]);
 
       // HP tag — below token
       const hpTag = buildText()
-        .plainText(`${army.hp}/${army.maxHp}`)
-        .position({ x: token.position.x, y: token.position.y + grid * 0.6 })
+        .name(`kw-hp-${army.tokenId}`)
+        .plainText(`${army.hp} / ${army.maxHp} HP`)
+        .position({ x: token.position.x, y: token.position.y + grid * 0.65 })
         .layer('TEXT').locked(true).visible(true).textType('PLAIN')
         .fontSize(14).fontWeight(600).textAlign('CENTER')
         .fillColor(hpColor).strokeColor('#111110').strokeWidth(3)
-        .attachedTo(army.tokenId).metadata({ [HP_TAG_KEY]: army.tokenId }).build();
-
-      await OBR.scene.items.addItems([nameTag, hpTag]);
+        .attachedTo(army.tokenId)
+        .metadata({ [HP_TAG_KEY]: army.tokenId })
+        .build();
+      await OBR.scene.items.addItems([hpTag]);
     }
   } catch(e) { console.warn('updateNameTags', e); }
 }
