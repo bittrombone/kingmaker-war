@@ -270,55 +270,58 @@ async function updateNameTags() {
     const items = await OBR.scene.items.getItems();
     const { buildText } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
     const grid = await OBR.scene.grid.getDpi();
+
+    // Step 1: delete ALL existing kw tags in one batch (avoids stale-list bug)
+    const allOldTags = items.filter(i =>
+      i.metadata?.[NAME_TAG_KEY] !== undefined ||
+      i.metadata?.[HP_TAG_KEY]   !== undefined
+    );
+    if (allOldTags.length > 0) await OBR.scene.items.deleteItems(allOldTags.map(t=>t.id));
+
+    // Step 2: build all new tags
+    const newTags = [];
+    const boxW = 300;
+
     for (const army of armies) {
       if (!army.tokenId) continue;
       const token = items.find(i=>i.id===army.tokenId);
       if (!token) continue;
-      const isActive = activeTurn?.id === army.id;
+
+      const isActive  = activeTurn?.id === army.id;
       const nameColor = isActive ? '#00FF88' : army.friendly ? '#7EC8E3' : '#F09595';
+      const hpPct     = army.maxHp > 0 ? army.hp / army.maxHp : 1;
+      const hpColor   = hpPct > 0.5 ? '#66DD66' : hpPct > 0.25 ? '#EF9F27' : '#E24B4A';
 
-      // HP color: green → yellow → red
-      const hpPct = army.maxHp > 0 ? army.hp / army.maxHp : 1;
-      const hpColor = hpPct > 0.5 ? '#66DD66' : hpPct > 0.25 ? '#EF9F27' : '#E24B4A';
-
-      // Delete existing name + hp tags
-      const existingTags = items.filter(i =>
-        i.metadata?.[NAME_TAG_KEY] === army.tokenId ||
-        i.metadata?.[HP_TAG_KEY]   === army.tokenId
-      );
-      if (existingTags.length > 0) await OBR.scene.items.deleteItems(existingTags.map(t=>t.id));
-
-      // Fixed pixel width centered over token: offset x left by half
-      const boxW = 200;
-
-      // Name tag — above token
-      const nameTag = buildText()
+      newTags.push(buildText()
         .name(`kw-name-${army.tokenId}`)
         .plainText(army.name)
-        .position({ x: token.position.x - boxW / 2, y: token.position.y - grid * 0.85 })
+        .position({ x: token.position.x - boxW / 2, y: token.position.y - grid * 0.9 })
         .layer('TEXT').locked(true).visible(true).textType('PLAIN')
         .width(boxW)
         .fontSize(22).fontWeight(700).textAlign('CENTER')
         .fillColor(nameColor).strokeColor('#111110').strokeWidth(4)
         .attachedTo(army.tokenId)
         .metadata({ [NAME_TAG_KEY]: army.tokenId })
-        .build();
-      await OBR.scene.items.addItems([nameTag]);
+        .build()
+      );
 
-      // HP tag — below token
-      const hpTag = buildText()
+      newTags.push(buildText()
         .name(`kw-hp-${army.tokenId}`)
         .plainText(`${army.hp} / ${army.maxHp}`)
         .position({ x: token.position.x - boxW / 2, y: token.position.y + grid * 0.65 })
         .layer('TEXT').locked(true).visible(true).textType('PLAIN')
         .width(boxW)
-        .fontSize(20).fontWeight(700).textAlign('CENTER')
+        .fontSize(26).fontWeight(700).textAlign('CENTER')
         .fillColor(hpColor).strokeColor('#111110').strokeWidth(4)
         .attachedTo(army.tokenId)
         .metadata({ [HP_TAG_KEY]: army.tokenId })
-        .build();
-      await OBR.scene.items.addItems([hpTag]);
+        .build()
+      );
     }
+
+    // Step 3: add all new tags in one batch
+    if (newTags.length > 0) await OBR.scene.items.addItems(newTags);
+
   } catch(e) { console.warn('updateNameTags', e); }
 }
 async function removeNameTag(tokenId) {
