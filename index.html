@@ -9,26 +9,21 @@
     /* Dice overlay */
     #dice-overlay {
       display:none; position:fixed; inset:0;
-      background:rgba(0,0,0,0.75); z-index:1000;
+      background:rgba(0,0,0,0.82); z-index:1000;
       align-items:center; justify-content:center; flex-direction:column;
+      gap:2px;
     }
     #dice-overlay.show { display:flex; }
-    .dice-face {
-      width:96px; height:96px; background:#1a1a18;
-      border:3px solid #EF9F27; border-radius:14px;
-      display:flex; align-items:center; justify-content:center;
-      font-size:46px; font-weight:700; color:#EF9F27;
-      box-shadow:0 0 32px rgba(239,159,39,0.45);
-    }
-    .dice-face.rolling { animation:diceRoll 0.55s ease-out; }
+    #dice-svg { transition: transform 0.05s; }
+    #dice-svg.rolling { animation: diceRoll 0.65s ease-out; }
     @keyframes diceRoll {
-      0%  { transform:rotate(0deg) scale(1); }
-      20% { transform:rotate(-14deg) scale(1.1); }
-      45% { transform:rotate(10deg) scale(0.95); }
-      70% { transform:rotate(-5deg) scale(1.04); }
-      100%{ transform:rotate(0deg) scale(1); }
+      0%   { transform: rotate(0deg)    scale(1);    }
+      15%  { transform: rotate(-22deg)  scale(1.12); }
+      35%  { transform: rotate(18deg)   scale(0.93); }
+      55%  { transform: rotate(-11deg)  scale(1.06); }
+      75%  { transform: rotate(6deg)    scale(0.97); }
+      100% { transform: rotate(0deg)    scale(1);    }
     }
-    .dice-sub { color:#888; font-size:11px; margin-top:7px; letter-spacing:1px; min-height:16px; }
     .dice-btn-row { margin-top:14px; display:flex; gap:7px; flex-wrap:wrap; justify-content:center; }
     .dice-type-btn {
       padding:5px 11px; background:#1a1a18; border:1px solid #444;
@@ -47,8 +42,20 @@
 
 <!-- Dice overlay -->
 <div id="dice-overlay">
-  <div class="dice-face" id="dice-face">20</div>
-  <div class="dice-sub"  id="dice-sub">d20</div>
+  <svg id="dice-svg" viewBox="0 0 120 120" width="140" height="140" style="filter:drop-shadow(0 0 18px #EF9F2799)">
+    <!-- d20 icosahedron face approximation -->
+    <polygon id="die-face-main" points="60,8 112,42 112,78 60,112 8,78 8,42" fill="#1a1a18" stroke="#EF9F27" stroke-width="2.5"/>
+    <polygon id="die-face-top"  points="60,8 112,42 60,48 8,42" fill="#2a2500" stroke="#EF9F27" stroke-width="1.5"/>
+    <polygon id="die-face-mid"  points="60,48 112,42 112,78 60,72 8,78 8,42" fill="#222200" stroke="#EF9F27" stroke-width="1.5"/>
+    <!-- inner triangle detail -->
+    <polygon points="60,22 95,44 60,55 25,44" fill="none" stroke="#EF9F2755" stroke-width="1"/>
+    <polygon points="60,65 95,76 60,108 25,76" fill="none" stroke="#EF9F2755" stroke-width="1"/>
+    <!-- result number -->
+    <text id="dice-num" x="60" y="70" text-anchor="middle" dominant-baseline="middle"
+      font-size="36" font-weight="700" fill="#EF9F27"
+      style="font-family:serif;letter-spacing:-1px">20</text>
+  </svg>
+  <div id="dice-sub" style="color:#888;font-size:12px;margin-top:6px;letter-spacing:1px;min-height:18px">d20</div>
   <div class="dice-btn-row">
     <button class="dice-type-btn" id="dbtn-4"   onclick="diceSetType(4)">d4</button>
     <button class="dice-type-btn" id="dbtn-6"   onclick="diceSetType(6)">d6</button>
@@ -114,23 +121,35 @@ function diceSetTypeInternal(n) {
 }
 window.diceRollNow = function() {
   clearTimeout(_diceTimer);
-  const face = document.getElementById('dice-face');
-  const sub  = document.getElementById('dice-sub');
-  face.classList.remove('rolling');
-  void face.offsetWidth;
-  face.classList.add('rolling');
+  const svg = document.getElementById('dice-svg');
+  const num = document.getElementById('dice-num');
+  const sub = document.getElementById('dice-sub');
+  svg.classList.remove('rolling');
+  void svg.offsetWidth;
+  svg.classList.add('rolling');
   let ticks = 0;
   const iv = setInterval(() => {
-    face.textContent = Math.floor(Math.random() * _diceType) + 1;
+    num.textContent = Math.floor(Math.random() * _diceType) + 1;
     ticks++;
-    if (ticks > 9) {
+    if (ticks > 10) {
       clearInterval(iv);
       const result = Math.floor(Math.random() * _diceType) + 1;
-      face.textContent = result;
-      sub.textContent  = `d${_diceType} → ${result}`;
+      num.textContent = result;
+      // Color nat 1 red, nat max gold+glow, else white
+      if (result === 1) {
+        num.setAttribute('fill', '#E24B4A');
+        svg.style.filter = 'drop-shadow(0 0 18px #E24B4A99)';
+      } else if (result === _diceType) {
+        num.setAttribute('fill', '#FFD700');
+        svg.style.filter = 'drop-shadow(0 0 24px #FFD700cc)';
+      } else {
+        num.setAttribute('fill', '#EF9F27');
+        svg.style.filter = 'drop-shadow(0 0 18px #EF9F2799)';
+      }
+      sub.textContent = `d${_diceType} → ${result}`;
       if (_diceCallback) { _diceCallback(result); _diceCallback = null; }
     }
-  }, 65);
+  }, 60);
 };
 
 // Helper: show dice then continue — used by roll buttons
@@ -721,7 +740,7 @@ window.toggleCondition= async (id,k) => {
   await saveData(); render();
 };
 window.startRoll      = async (id,rt) => { if(targetingMode?.armyId===id&&targetingMode?.rollType===rt){targetingMode=null;await saveData();render();return;} targetingMode={armyId:id,rollType:rt}; await saveData(); render(); };
-window.executeRoll    = async (atkId,tgtId,rt) => { await resolveRoll(atkId,tgtId,rt); targetingMode=null; await saveData(); render(); };
+window.executeRoll    = async (atkId,tgtId,rt) => { targetingMode=null; await resolveRoll(atkId,tgtId,rt); };
 window.cancelTargeting= async ()     => { targetingMode=null; await saveData(); render(); };
 window.setTerrain     = async (t)    => {
   terrain=t;
