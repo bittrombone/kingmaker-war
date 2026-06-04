@@ -9,28 +9,75 @@
     /* Dice overlay */
     #dice-overlay {
       display:none; position:fixed; inset:0;
-      background:rgba(0,0,0,0.82); z-index:1000;
-      align-items:center; justify-content:center; flex-direction:column;
-      gap:2px;
+      background:rgba(0,0,0,0.0); z-index:1000;
+      pointer-events:none;
     }
-    #dice-overlay.show { display:flex; }
-    #dice-svg { transition: transform 0.05s; }
-    #dice-svg.rolling { animation: diceRoll 0.65s ease-out; }
-    @keyframes diceRoll {
-      0%   { transform: rotate(0deg)    scale(1);    }
-      15%  { transform: rotate(-22deg)  scale(1.12); }
-      35%  { transform: rotate(18deg)   scale(0.93); }
-      55%  { transform: rotate(-11deg)  scale(1.06); }
-      75%  { transform: rotate(6deg)    scale(0.97); }
-      100% { transform: rotate(0deg)    scale(1);    }
+    #dice-overlay.show { display:block; }
+    #dice-overlay.active { pointer-events:all; }
+
+    /* The rolling die that travels across the screen */
+    #dice-roller-wrap {
+      position:absolute;
+      width:120px; height:120px;
     }
-    .dice-btn-row { margin-top:14px; display:flex; gap:7px; flex-wrap:wrap; justify-content:center; }
+    #dice-roller-wrap.rolling {
+      animation: dicePath 1.4s cubic-bezier(0.25,0.46,0.45,0.94) forwards;
+    }
+    @keyframes dicePath {
+      0%   { left:-140px; top:calc(20% + 60px); opacity:1; }
+      100% { left:calc(100% + 20px); top:calc(60% - 60px); opacity:1; }
+    }
+    #dice-3d {
+      width:120px; height:120px;
+      transform-style: preserve-3d;
+      position:relative;
+    }
+    #dice-roller-wrap.rolling #dice-3d {
+      animation: diceSpin 1.4s cubic-bezier(0.15,0.5,0.5,1.0) forwards;
+    }
+    @keyframes diceSpin {
+      0%   { transform: rotateX(0deg)   rotateY(0deg)   rotateZ(0deg);   }
+      30%  { transform: rotateX(280deg) rotateY(180deg) rotateZ(120deg); }
+      60%  { transform: rotateX(500deg) rotateY(380deg) rotateZ(260deg); }
+      80%  { transform: rotateX(640deg) rotateY(520deg) rotateZ(340deg); }
+      90%  { transform: rotateX(700deg) rotateY(580deg) rotateZ(370deg); }
+      100% { transform: rotateX(720deg) rotateY(600deg) rotateZ(380deg); }
+    }
+
+    /* Settled die — centered, large */
+    #dice-settled {
+      display:none;
+      position:absolute;
+      top:50%; left:50%;
+      transform:translate(-50%,-50%);
+      animation: diceSettle 0.35s cubic-bezier(0.34,1.56,0.64,1) forwards;
+      filter:drop-shadow(0 0 28px #EF9F27aa);
+    }
+    @keyframes diceSettle {
+      0%   { transform:translate(-50%,-50%) scale(0.4) rotate(-30deg); opacity:0; }
+      100% { transform:translate(-50%,-50%) scale(1)   rotate(0deg);   opacity:1; }
+    }
+
+    /* Bottom UI bar when settled */
+    #dice-result-bar {
+      display:none;
+      position:absolute;
+      bottom:60px; left:50%; transform:translateX(-50%);
+      text-align:center;
+    }
+    #dice-result-bar .dice-sub {
+      color:#888; font-size:13px; letter-spacing:1px; margin-bottom:10px;
+    }
+    #dice-result-bar .dice-btn-row {
+      display:flex; gap:7px; flex-wrap:wrap; justify-content:center; margin-bottom:10px;
+    }
+    #dice-result-bar .dice-actions { display:flex; gap:8px; justify-content:center; }
+
     .dice-type-btn {
       padding:5px 11px; background:#1a1a18; border:1px solid #444;
       border-radius:4px; color:#888; cursor:pointer; font-size:12px;
     }
     .dice-type-btn.sel { border-color:#EF9F27; color:#EF9F27; background:#2a2200; }
-    .dice-actions { margin-top:14px; display:flex; gap:8px; }
     .dice-actions button {
       padding:6px 18px; background:#2a2a28; border:1px solid #555;
       border-radius:4px; color:#aaa; cursor:pointer; font-size:12px;
@@ -42,33 +89,61 @@
 
 <!-- Dice overlay -->
 <div id="dice-overlay">
-  <svg id="dice-svg" viewBox="0 0 120 120" width="140" height="140" style="filter:drop-shadow(0 0 18px #EF9F2799)">
-    <!-- d20 icosahedron face approximation -->
-    <polygon id="die-face-main" points="60,8 112,42 112,78 60,112 8,78 8,42" fill="#1a1a18" stroke="#EF9F27" stroke-width="2.5"/>
-    <polygon id="die-face-top"  points="60,8 112,42 60,48 8,42" fill="#2a2500" stroke="#EF9F27" stroke-width="1.5"/>
-    <polygon id="die-face-mid"  points="60,48 112,42 112,78 60,72 8,78 8,42" fill="#222200" stroke="#EF9F27" stroke-width="1.5"/>
-    <!-- inner triangle detail -->
-    <polygon points="60,22 95,44 60,55 25,44" fill="none" stroke="#EF9F2755" stroke-width="1"/>
-    <polygon points="60,65 95,76 60,108 25,76" fill="none" stroke="#EF9F2755" stroke-width="1"/>
-    <!-- result number -->
-    <text id="dice-num" x="60" y="70" text-anchor="middle" dominant-baseline="middle"
-      font-size="36" font-weight="700" fill="#EF9F27"
-      style="font-family:serif;letter-spacing:-1px">20</text>
-  </svg>
-  <div id="dice-sub" style="color:#888;font-size:12px;margin-top:6px;letter-spacing:1px;min-height:18px">d20</div>
-  <div class="dice-btn-row">
-    <button class="dice-type-btn" id="dbtn-4"   onclick="diceSetType(4)">d4</button>
-    <button class="dice-type-btn" id="dbtn-6"   onclick="diceSetType(6)">d6</button>
-    <button class="dice-type-btn" id="dbtn-8"   onclick="diceSetType(8)">d8</button>
-    <button class="dice-type-btn" id="dbtn-10"  onclick="diceSetType(10)">d10</button>
-    <button class="dice-type-btn" id="dbtn-12"  onclick="diceSetType(12)">d12</button>
-    <button class="dice-type-btn sel" id="dbtn-20" onclick="diceSetType(20)">d20</button>
-    <button class="dice-type-btn" id="dbtn-100" onclick="diceSetType(100)">d%</button>
+
+  <!-- Rolling die that travels across screen -->
+  <div id="dice-roller-wrap">
+    <div id="dice-3d">
+      <svg viewBox="0 0 120 120" width="120" height="120">
+        <polygon points="60,4 116,34 116,86 60,116 4,86 4,34" fill="#1a1a18" stroke="#EF9F27" stroke-width="3"/>
+        <polygon points="60,4 116,34 60,50 4,34"   fill="#2d2600" stroke="#EF9F27" stroke-width="1.5"/>
+        <polygon points="60,70 116,86 60,116 4,86"  fill="#1a1800" stroke="#EF9F27" stroke-width="1.5"/>
+        <polygon points="60,16 100,38 60,54 20,38" fill="none" stroke="#EF9F2760" stroke-width="1.2"/>
+        <polygon points="60,66 100,82 60,106 20,82" fill="none" stroke="#EF9F2760" stroke-width="1.2"/>
+      </svg>
+    </div>
   </div>
-  <div class="dice-actions">
-    <button onclick="diceRollNow()">🎲 Roll Again</button>
-    <button onclick="diceClose()">Close</button>
+
+  <!-- Settled large die shown after roll -->
+  <div id="dice-settled">
+    <svg id="dice-settled-svg" viewBox="0 0 200 200" width="260" height="260">
+      <defs>
+        <radialGradient id="dg" cx="40%" cy="35%" r="65%">
+          <stop offset="0%"   stop-color="#3a3200"/>
+          <stop offset="100%" stop-color="#0d0c00"/>
+        </radialGradient>
+      </defs>
+      <polygon points="100,6 194,56 194,144 100,194 6,144 6,56"
+        fill="url(#dg)" stroke="#EF9F27" stroke-width="4"/>
+      <polygon points="100,6 194,56 100,80 6,56"
+        fill="#2d2500" stroke="#EF9F27" stroke-width="2"/>
+      <polygon points="100,120 194,144 100,194 6,144"
+        fill="#1a1500" stroke="#EF9F27" stroke-width="2"/>
+      <polygon points="100,24 168,60 100,82 32,60"  fill="none" stroke="#EF9F2750" stroke-width="1.5"/>
+      <polygon points="100,118 168,140 100,190 32,140" fill="none" stroke="#EF9F2750" stroke-width="1.5"/>
+      <text id="dice-num" x="100" y="108" text-anchor="middle" dominant-baseline="middle"
+        font-size="72" font-weight="900" fill="#EF9F27"
+        style="font-family:Georgia,serif;letter-spacing:-2px">20</text>
+    </svg>
   </div>
+
+  <!-- Result bar shown after settle -->
+  <div id="dice-result-bar">
+    <div class="dice-sub" id="dice-sub">d20</div>
+    <div class="dice-btn-row">
+      <button class="dice-type-btn" id="dbtn-4"   onclick="diceSetType(4)">d4</button>
+      <button class="dice-type-btn" id="dbtn-6"   onclick="diceSetType(6)">d6</button>
+      <button class="dice-type-btn" id="dbtn-8"   onclick="diceSetType(8)">d8</button>
+      <button class="dice-type-btn" id="dbtn-10"  onclick="diceSetType(10)">d10</button>
+      <button class="dice-type-btn" id="dbtn-12"  onclick="diceSetType(12)">d12</button>
+      <button class="dice-type-btn sel" id="dbtn-20" onclick="diceSetType(20)">d20</button>
+      <button class="dice-type-btn" id="dbtn-100" onclick="diceSetType(100)">d%</button>
+    </div>
+    <div class="dice-actions">
+      <button onclick="diceRollNow()">🎲 Roll Again</button>
+      <button onclick="diceClose()">Close</button>
+    </div>
+  </div>
+
 </div>
 
 <div class="app" id="app">
@@ -120,36 +195,58 @@ function diceSetTypeInternal(n) {
   if (btn) btn.classList.add('sel');
 }
 window.diceRollNow = function() {
-  clearTimeout(_diceTimer);
-  const svg = document.getElementById('dice-svg');
-  const num = document.getElementById('dice-num');
-  const sub = document.getElementById('dice-sub');
-  svg.classList.remove('rolling');
-  void svg.offsetWidth;
-  svg.classList.add('rolling');
-  let ticks = 0;
-  const iv = setInterval(() => {
-    num.textContent = Math.floor(Math.random() * _diceType) + 1;
-    ticks++;
-    if (ticks > 10) {
-      clearInterval(iv);
-      const result = Math.floor(Math.random() * _diceType) + 1;
-      num.textContent = result;
-      // Color nat 1 red, nat max gold+glow, else white
-      if (result === 1) {
-        num.setAttribute('fill', '#E24B4A');
-        svg.style.filter = 'drop-shadow(0 0 18px #E24B4A99)';
-      } else if (result === _diceType) {
-        num.setAttribute('fill', '#FFD700');
-        svg.style.filter = 'drop-shadow(0 0 24px #FFD700cc)';
-      } else {
-        num.setAttribute('fill', '#EF9F27');
-        svg.style.filter = 'drop-shadow(0 0 18px #EF9F2799)';
-      }
-      sub.textContent = `d${_diceType} → ${result}`;
-      if (_diceCallback) { _diceCallback(result); _diceCallback = null; }
+  const wrap    = document.getElementById('dice-roller-wrap');
+  const settled = document.getElementById('dice-settled');
+  const bar     = document.getElementById('dice-result-bar');
+  const num     = document.getElementById('dice-num');
+  const sub     = document.getElementById('dice-sub');
+  const overlay = document.getElementById('dice-overlay');
+
+  // Hide settled die, show rolling die
+  settled.style.display = 'none';
+  bar.style.display = 'none';
+  wrap.style.display = 'block';
+  overlay.style.background = 'rgba(0,0,0,0)';
+
+  // Reset animation
+  wrap.classList.remove('rolling');
+  void wrap.offsetWidth;
+  wrap.classList.add('rolling');
+
+  // Pick result immediately, reveal after animation
+  const result = Math.floor(Math.random() * _diceType) + 1;
+
+  // After travel animation ends (~1.4s), show settled die
+  setTimeout(() => {
+    wrap.style.display = 'none';
+    wrap.classList.remove('rolling');
+
+    // Set number and color
+    num.textContent = result;
+    let numColor, glowColor;
+    if (result === 1) {
+      numColor = '#E24B4A'; glowColor = '#E24B4A';
+    } else if (result === _diceType) {
+      numColor = '#FFD700'; glowColor = '#FFD700';
+    } else {
+      numColor = '#EF9F27'; glowColor = '#EF9F27';
     }
-  }, 60);
+    num.setAttribute('fill', numColor);
+    document.getElementById('dice-settled-svg').style.filter = `drop-shadow(0 0 32px ${glowColor}bb)`;
+
+    // Darken overlay, show settled die + bar
+    overlay.style.background = 'rgba(0,0,0,0.78)';
+    settled.style.display = 'block';
+    bar.style.display = 'block';
+    sub.textContent = `d${_diceType} → ${result}`;
+
+    // Reset settled animation
+    settled.style.animation = 'none';
+    void settled.offsetWidth;
+    settled.style.animation = '';
+
+    if (_diceCallback) { _diceCallback(result); _diceCallback = null; }
+  }, 1400);
 };
 
 // Helper: show dice then continue — used by roll buttons
