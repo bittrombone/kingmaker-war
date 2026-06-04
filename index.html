@@ -68,25 +68,24 @@ function rollWithDicePlus(diceType) {
     };
 
     try {
-      // Write the roll request to player metadata — Dice+ picks this up
-      await OBR.player.setMetadata({ [DICE_ROLL_KEY]: roll });
-
-      // Listen for the roll result via party metadata change
+      // Listen BEFORE writing — avoids race condition where result arrives
+      // before the listener is set up. Use OBR.player.onChange (not party)
+      // because party.onChange excludes the local player.
       _diceResolve = resolve;
-      _diceUnsubscribe = OBR.party.onChange((players) => {
-        const me = players.find(p => p.id === _myPlayerId);
-        if (!me) return;
-        const values = me.metadata[DICE_VALUES_KEY];
+      _diceUnsubscribe = OBR.player.onChange((player) => {
+        const values = player.metadata[DICE_VALUES_KEY];
         if (!values) return;
         const result = values[dieId];
         if (result !== null && result !== undefined) {
-          // Got result!
           if (_diceUnsubscribe) { _diceUnsubscribe(); _diceUnsubscribe = null; }
           clearTimeout(_diceTimeout);
           _diceResolve = null;
           resolve(result === 0 ? 10 : result); // D10 rolls 0 for 10
         }
       });
+
+      // Write the roll request — Dice+ picks this up and rolls
+      await OBR.player.setMetadata({ [DICE_ROLL_KEY]: roll });
 
       // Timeout fallback — use random if Dice+ never responds
       _diceTimeout = setTimeout(() => {
@@ -104,7 +103,6 @@ function rollWithDicePlus(diceType) {
   });
 }
 
-// Also check own player ID on party changes (needed for party.onChange lookup)
 let _myPlayerId = null;
 
 // ── App state ──────────────────────────────────────────────────────
