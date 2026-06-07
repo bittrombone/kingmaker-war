@@ -145,15 +145,15 @@ function renderCard() {
         </div>
       </div>
       <div class="stat-edit-grid">
-        <div class="stat-edit"><label>AC${gb.ac?` <span style='color:#5DCAA5'>+${gb.ac}</span>`:''}</label><input type="number" value="${army.ac}" onchange="setStat('ac',this.value)"/></div>
-        <div class="stat-edit"><label>MAN</label><input type="number" value="${army.man}" onchange="setStat('man',this.value)"/></div>
-        <div class="stat-edit"><label>MOR</label><input type="number" value="${army.mor}" onchange="setStat('mor',this.value)"/></div>
-        <div class="stat-edit"><label>SCT</label><input type="number" value="${army.sct}" onchange="setStat('sct',this.value)"/></div>
-        <div class="stat-edit"><label>ATK${gb.atk?` <span style='color:#5DCAA5'>+${gb.atk}</span>`:''}</label><input type="number" value="${army.atk}" onchange="setStat('atk',this.value)"/></div>
-        <div class="stat-edit"><label>RNG${gb.rng?` <span style='color:#5DCAA5'>+${gb.rng}</span>`:''}</label><input type="number" value="${army.rng}" onchange="setStat('rng',this.value)"/></div>
-        <div class="stat-edit"><label>Max HP</label><input type="number" value="${army.maxHp}" onchange="setStat('maxHp',this.value)"/></div>
-        <div class="stat-edit"><label>RT</label><input type="number" value="${army.rt}" onchange="setStat('rt',this.value)"/></div>
-        <div class="stat-edit"><label>Shots</label><input type="number" value="${army.maxShots||0}" onchange="setStat('maxShots',this.value)"/></div>
+        <div class="stat-edit"><label>AC${gb.ac?` <span style='color:#5DCAA5'>+${gb.ac}</span>`:''}</label><input type="number" value="${army.ac}" oninput="setStat('ac',this.value)"/></div>
+        <div class="stat-edit"><label>MAN</label><input type="number" value="${army.man}" oninput="setStat('man',this.value)"/></div>
+        <div class="stat-edit"><label>MOR</label><input type="number" value="${army.mor}" oninput="setStat('mor',this.value)"/></div>
+        <div class="stat-edit"><label>SCT</label><input type="number" value="${army.sct}" oninput="setStat('sct',this.value)"/></div>
+        <div class="stat-edit"><label>ATK${gb.atk?` <span style='color:#5DCAA5'>+${gb.atk}</span>`:''}</label><input type="number" value="${army.atk}" oninput="setStat('atk',this.value)"/></div>
+        <div class="stat-edit"><label>RNG${gb.rng?` <span style='color:#5DCAA5'>+${gb.rng}</span>`:''}</label><input type="number" value="${army.rng}" oninput="setStat('rng',this.value)"/></div>
+        <div class="stat-edit"><label>Max HP</label><input type="number" value="${army.maxHp}" oninput="setStat('maxHp',this.value)"/></div>
+        <div class="stat-edit"><label>RT</label><input type="number" value="${army.rt}" oninput="setStat('rt',this.value)"/></div>
+        <div class="stat-edit"><label>Shots</label><input type="number" value="${army.maxShots||0}" oninput="setStat('maxShots',this.value)"/></div>
       </div>
     `:''}
     ${scTab==='gear'?`
@@ -225,7 +225,17 @@ function renderCard() {
 }
 
 window.setSide = (f) => { army.friendly=f; renderCard(); };
-window.setStat = (s,v) => { if(s==='type') army[s]=v; else { army[s]=parseInt(v)||0; if(s==='maxHp') army.hp=Math.min(army.hp,army.maxHp); } };
+window.setStat = (s,v) => {
+  if(s==='type') army[s]=v;
+  else {
+    const n=parseInt(v)||0;
+    army[s]=n;
+    if(s==='maxHp') {
+      army.maxHp=n;
+      army.hp=Math.min(army.hp,army.maxHp); // clamp hp if maxHp reduced
+    }
+  }
+};
 window.switchTab = (t) => { scTab=t; renderCard(); };
 window.changeHp = (d) => { army.hp=Math.max(0,Math.min(army.maxHp,army.hp+d)); renderCard(); };
 window.toggleCond = (k) => {
