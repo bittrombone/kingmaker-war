@@ -8,56 +8,61 @@
   <style>
     /* No custom dice overlay — using Dice+ */
 
-    /* Chat log */
-    #chat-tab { display:none; flex-direction:column; height:100%; overflow:hidden; }
-    #chat-tab.visible { display:flex; }
+    /* Chat log panel — always visible below main content */
+    .app { display:flex; flex-direction:column; height:100vh; }
+    #content { flex:1; overflow-y:auto; min-height:0; }
+    #chat-panel {
+      flex-shrink:0;
+      height:200px;
+      border-top:1px solid #2a2a28;
+      display:flex; flex-direction:column;
+      background:#0d0d0b;
+    }
+    #chat-panel-header {
+      display:flex; justify-content:space-between; align-items:center;
+      padding:4px 8px; border-bottom:0.5px solid #222;
+      font-size:10px; color:#555; letter-spacing:1px; flex-shrink:0;
+    }
+    #chat-panel-header button {
+      font-size:10px; padding:1px 6px; background:#1a1a18;
+      border:0.5px solid #333; border-radius:3px; color:#555; cursor:pointer;
+    }
+    #chat-panel-header button:hover { color:#888; }
     #chat-log {
-      flex:1; overflow-y:auto; padding:8px 6px;
-      display:flex; flex-direction:column; gap:6px;
+      flex:1; overflow-y:auto; padding:5px 6px;
+      display:flex; flex-direction:column; gap:4px;
     }
     .chat-entry {
-      background:#111110; border-radius:6px;
-      border-left:3px solid #333; padding:8px 10px;
-      font-size:12px; flex-shrink:0;
+      background:#111110; border-radius:5px;
+      border-left:3px solid #333; padding:6px 8px;
+      font-size:11px; flex-shrink:0;
     }
     .chat-entry.crit-success { border-left-color:#FFD700; }
     .chat-entry.success      { border-left-color:#4CAF50; }
     .chat-entry.failure      { border-left-color:#EF9F27; }
     .chat-entry.crit-fail    { border-left-color:#E24B4A; }
     .chat-entry.info         { border-left-color:#7EC8E3; }
-    .chat-header { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:3px; }
+    .chat-header { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:2px; }
     .chat-who    { font-weight:700; font-size:11px; color:#D3D1C7; }
     .chat-time   { font-size:10px; color:#444; }
-    .chat-roll-type { font-size:11px; color:#888; margin-bottom:2px; }
-    .chat-total  { font-size:28px; font-weight:900; line-height:1; margin:2px 0; }
+    .chat-roll-type { font-size:10px; color:#888; margin-bottom:1px; }
+    .chat-total  { font-size:22px; font-weight:900; line-height:1; margin:1px 0; }
     .chat-total.crit-success { color:#FFD700; }
     .chat-total.success      { color:#4CAF50; }
     .chat-total.failure      { color:#EF9F27; }
     .chat-total.crit-fail    { color:#E24B4A; }
     .chat-total.info         { color:#7EC8E3; }
-    .chat-degree { font-size:11px; font-weight:700; margin-bottom:2px; }
+    .chat-degree { font-size:10px; font-weight:700; margin-bottom:1px; }
     .chat-degree.crit-success { color:#FFD700; }
     .chat-degree.success      { color:#4CAF50; }
     .chat-degree.failure      { color:#EF9F27; }
     .chat-degree.crit-fail    { color:#E24B4A; }
-    .chat-detail  { font-size:10px; color:#555; margin-bottom:2px; }
-    .chat-outcome { font-size:11px; color:#D3D1C7; }
-    .chat-empty   { color:#444; font-size:12px; text-align:center; margin-top:40px; }
-    #chat-clear {
-      padding:5px; font-size:10px; background:#1a1a18;
-      border:0.5px solid #333; border-radius:3px; color:#555;
-      cursor:pointer; margin:4px 6px; flex-shrink:0;
-    }
-    #chat-clear:hover { color:#888; }
+    .chat-detail  { font-size:10px; color:#555; margin-bottom:1px; }
+    .chat-outcome { font-size:10px; color:#D3D1C7; }
+    .chat-empty   { color:#444; font-size:11px; text-align:center; margin-top:16px; }
   </style>
 </head>
 <body>
-
-<!-- Chat log panel (persists across tab switches) -->
-<div id="chat-tab">
-  <div id="chat-log"><div class="chat-empty">No rolls yet.</div></div>
-  <button id="chat-clear" onclick="clearChatLog()">Clear Log</button>
-</div>
 
 <!-- No custom dice overlay — we use Dice+ extension -->
 
@@ -73,13 +78,21 @@
     <div class="tab active" onclick="showTab('battle')">Battle</div>
     <div class="tab"        onclick="showTab('armies')">Armies</div>
     <div class="tab"        onclick="showTab('forts')">Forts</div>
-    <div class="tab"        onclick="showTab('log')" id="log-tab-btn">Log</div>
+
   </div>
   <div class="content" id="content">
     <div class="empty" style="margin-top:40px">
       <div style="font-size:24px;margin-bottom:12px">⚔</div>
       Connecting to Owlbear Rodeo…
     </div>
+  </div>
+  <!-- Chat log — always visible below main content -->
+  <div id="chat-panel">
+    <div id="chat-panel-header">
+      <span>📜 Roll Log</span>
+      <button onclick="clearChatLog()">Clear</button>
+    </div>
+    <div id="chat-log"><div class="chat-empty">No rolls yet.</div></div>
   </div>
 </div>
 
@@ -93,85 +106,63 @@ import OBR from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
 // Receive results on "{source}/roll-result"
 
 const DICE_PLUS_SOURCE = "com.kingmaker.war";
-let _pendingRolls = {}; // rollId → resolve function
-let _resultUnsub = null;
-let _errorUnsub = null;
+let _pendingRolls = {};
 let _myPlayerId = null;
 let _myPlayerName = null;
-let _dicePlusAvailable = null; // null=unknown, true/false
 
-// Set up persistent listeners once OBR is ready (called from onReady)
+// Persistent listeners — set up once in onReady, never torn down
 function initDicePlusListeners() {
-  _resultUnsub = OBR.broadcast.onMessage(`${DICE_PLUS_SOURCE}/roll-result`, (event) => {
+  // Result channel — Dice+ sends result back here after rolling
+  OBR.broadcast.onMessage(`${DICE_PLUS_SOURCE}/roll-result`, (event) => {
     const data = event.data;
     const resolve = _pendingRolls[data.rollId];
     if (resolve) {
       delete _pendingRolls[data.rollId];
-      resolve(data.result.totalValue);
+      // totalValue is the sum; for a single die it equals the face value
+      const val = data.result?.totalValue ?? data.result?.value ?? data.value;
+      resolve(val !== undefined ? (val === 0 ? 10 : val) : (Math.floor(Math.random()*20)+1));
     }
   });
-  _errorUnsub = OBR.broadcast.onMessage(`${DICE_PLUS_SOURCE}/roll-error`, (event) => {
+  // Error channel
+  OBR.broadcast.onMessage(`${DICE_PLUS_SOURCE}/roll-error`, (event) => {
     const data = event.data;
     const resolve = _pendingRolls[data.rollId];
     if (resolve) {
       delete _pendingRolls[data.rollId];
-      console.warn("Dice+ roll error:", data.error);
       resolve(Math.floor(Math.random() * 20) + 1);
     }
   });
 }
 
-async function checkDicePlusAvailable() {
-  if (_dicePlusAvailable !== null) return _dicePlusAvailable;
-  const requestId = crypto.randomUUID();
-  return new Promise((resolve) => {
-    const unsub = OBR.broadcast.onMessage("dice-plus/isReady", (event) => {
-      const data = event.data;
-      if ('ready' in data && data.requestId === requestId) {
-        unsub();
-        _dicePlusAvailable = true;
-        resolve(true);
-      }
-    });
-    OBR.broadcast.sendMessage("dice-plus/isReady", {
-      requestId, timestamp: Date.now()
-    }, { destination: 'ALL' });
-    setTimeout(() => { unsub(); _dicePlusAvailable = false; resolve(false); }, 1500);
-  });
-}
-
 function rollWithDicePlus(diceType) {
   return new Promise(async (resolve) => {
-    const available = await checkDicePlusAvailable();
-    if (!available) {
-      console.warn("Dice+ not available, using Math.random()");
-      resolve(Math.floor(Math.random() * diceType) + 1);
-      return;
-    }
-    const rollId = `kw_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const rollId = `kw_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
     _pendingRolls[rollId] = resolve;
-    // Timeout fallback
-    setTimeout(() => {
+
+    // Timeout fallback — if Dice+ never responds, use Math.random
+    const timeout = setTimeout(() => {
       if (_pendingRolls[rollId]) {
         delete _pendingRolls[rollId];
-        console.warn("Dice+ result timeout, using Math.random()");
+        console.warn("Dice+ timeout — using Math.random()");
         resolve(Math.floor(Math.random() * diceType) + 1);
       }
     }, 30000);
+
     try {
       await OBR.broadcast.sendMessage("dice-plus/roll-request", {
         rollId,
         playerId: _myPlayerId,
-        playerName: _myPlayerName || "GM",
-        rollTarget: 'everyone',
+        playerName: _myPlayerName || "Unknown",
+        rollTarget: "everyone",
         diceNotation: `1d${diceType}`,
         showResults: true,
         timestamp: Date.now(),
         source: DICE_PLUS_SOURCE
-      }, { destination: 'ALL' });
+      }, { destination: "LOCAL" });
     } catch(e) {
+      clearTimeout(timeout);
       delete _pendingRolls[rollId];
-      console.warn("Dice+ send failed:", e);
+      console.warn("Dice+ unavailable:", e);
       resolve(Math.floor(Math.random() * diceType) + 1);
     }
   });
@@ -525,17 +516,8 @@ OBR.onReady(async () => {
 // ── Tabs ───────────────────────────────────────────────────────────
 window.showTab = function(tab) {
   activeTab=tab;
-  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',['battle','armies','forts','log'][i]===tab));
-  const contentEl=document.getElementById('content');
-  const chatTabEl=document.getElementById('chat-tab');
-  if(tab==='log'){
-    contentEl.style.display='none';
-    chatTabEl.classList.add('visible');
-  } else {
-    contentEl.style.display='';
-    chatTabEl.classList.remove('visible');
-    render();
-  }
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',['battle','armies','forts'][i]===tab));
+  render();
 };
 
 function render() {
@@ -909,13 +891,7 @@ function addChatEntry({ who, rollType, total, degree, detail, outcome }) {
   const time = now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
   chatEntries.unshift({ who, rollType, total, degree, detail, outcome, time });
   if (chatEntries.length > MAX_LOG) chatEntries.length = MAX_LOG;
-  if (activeTab === 'log') renderChatLog();
-  // Flash the Log tab
-  const btn = document.getElementById('log-tab-btn');
-  if (btn && activeTab !== 'log') {
-    btn.style.color = '#EF9F27';
-    setTimeout(() => { if(btn) btn.style.color = ''; }, 2000);
-  }
+  renderChatLog();
 }
 
 function renderChatLog() {
