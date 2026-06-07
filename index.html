@@ -38,72 +38,95 @@
 <script type="module">
 import OBR from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
 
-// ── Dice+ integration ──────────────────────────────────────────────
-// We trigger rolls via OBR player metadata and listen for results.
-// Dice+ reads: rodeo.owlbear.dice/roll  → triggers the 3D roll
-// Dice+ writes: rodeo.owlbear.dice/rollValues → the results
+// ── Dice+ integration via OBR Broadcast API ────────────────────────
+// Official API: https://extensions.owlbear.rodeo/dice-plus
+// Send roll requests on "dice-plus/roll-request"
+// Receive results on "{source}/roll-result"
 
-const DICE_ROLL_KEY   = "rodeo.owlbear.dice/roll";
-const DICE_VALUES_KEY = "rodeo.owlbear.dice/rollValues";
+const DICE_PLUS_SOURCE = "com.kingmaker.war";
+let _pendingRolls = {}; // rollId → resolve function
+let _resultUnsub = null;
+let _errorUnsub = null;
+let _myPlayerId = null;
+let _myPlayerName = null;
+let _dicePlusAvailable = null; // null=unknown, true/false
 
-// Returns a Promise<number> that triggers a Dice+ d20 roll and resolves with the result.
-// Falls back to Math.random() if Dice+ is not installed.
-let _diceResolve = null;
-let _diceUnsubscribe = null;
-let _diceTimeout = null;
-const DICE_TIMEOUT_MS = 30000; // 30s timeout if user never rolls
-
-function rollWithDicePlus(diceType) {
-  return new Promise(async (resolve) => {
-    // Clean up any previous pending roll
-    if (_diceUnsubscribe) { _diceUnsubscribe(); _diceUnsubscribe = null; }
-    clearTimeout(_diceTimeout);
-
-    const dieTypeMap = {4:"D4", 6:"D6", 8:"D8", 10:"D10", 12:"D12", 20:"D20", 100:"D100"};
-    const dieTypeName = dieTypeMap[diceType] || "D20";
-    const dieId = crypto.randomUUID();
-
-    const roll = {
-      dice: [{ id: dieId, style: "NEBULA", type: dieTypeName }]
-    };
-
-    try {
-      // Listen BEFORE writing — avoids race condition where result arrives
-      // before the listener is set up. Use OBR.player.onChange (not party)
-      // because party.onChange excludes the local player.
-      _diceResolve = resolve;
-      _diceUnsubscribe = OBR.player.onChange((player) => {
-        const values = player.metadata[DICE_VALUES_KEY];
-        if (!values) return;
-        const result = values[dieId];
-        if (result !== null && result !== undefined) {
-          if (_diceUnsubscribe) { _diceUnsubscribe(); _diceUnsubscribe = null; }
-          clearTimeout(_diceTimeout);
-          _diceResolve = null;
-          resolve(result === 0 ? 10 : result); // D10 rolls 0 for 10
-        }
-      });
-
-      // Write the roll request — Dice+ picks this up and rolls
-      await OBR.player.setMetadata({ [DICE_ROLL_KEY]: roll });
-
-      // Timeout fallback — use random if Dice+ never responds
-      _diceTimeout = setTimeout(() => {
-        if (_diceUnsubscribe) { _diceUnsubscribe(); _diceUnsubscribe = null; }
-        _diceResolve = null;
-        console.warn("Dice+ timeout — falling back to Math.random()");
-        resolve(Math.floor(Math.random() * diceType) + 1);
-      }, DICE_TIMEOUT_MS);
-
-    } catch(e) {
-      // Dice+ not available — fall back silently
-      console.warn("Dice+ not available, using Math.random()");
-      resolve(Math.floor(Math.random() * diceType) + 1);
+// Set up persistent listeners once OBR is ready (called from onReady)
+function initDicePlusListeners() {
+  _resultUnsub = OBR.broadcast.onMessage(`${DICE_PLUS_SOURCE}/roll-result`, (event) => {
+    const data = event.data;
+    const resolve = _pendingRolls[data.rollId];
+    if (resolve) {
+      delete _pendingRolls[data.rollId];
+      resolve(data.result.totalValue);
+    }
+  });
+  _errorUnsub = OBR.broadcast.onMessage(`${DICE_PLUS_SOURCE}/roll-error`, (event) => {
+    const data = event.data;
+    const resolve = _pendingRolls[data.rollId];
+    if (resolve) {
+      delete _pendingRolls[data.rollId];
+      console.warn("Dice+ roll error:", data.error);
+      resolve(Math.floor(Math.random() * 20) + 1);
     }
   });
 }
 
-let _myPlayerId = null;
+async function checkDicePlusAvailable() {
+  if (_dicePlusAvailable !== null) return _dicePlusAvailable;
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve) => {
+    const unsub = OBR.broadcast.onMessage("dice-plus/isReady", (event) => {
+      const data = event.data;
+      if ('ready' in data && data.requestId === requestId) {
+        unsub();
+        _dicePlusAvailable = true;
+        resolve(true);
+      }
+    });
+    OBR.broadcast.sendMessage("dice-plus/isReady", {
+      requestId, timestamp: Date.now()
+    }, { destination: 'ALL' });
+    setTimeout(() => { unsub(); _dicePlusAvailable = false; resolve(false); }, 1500);
+  });
+}
+
+function rollWithDicePlus(diceType) {
+  return new Promise(async (resolve) => {
+    const available = await checkDicePlusAvailable();
+    if (!available) {
+      console.warn("Dice+ not available, using Math.random()");
+      resolve(Math.floor(Math.random() * diceType) + 1);
+      return;
+    }
+    const rollId = `kw_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    _pendingRolls[rollId] = resolve;
+    // Timeout fallback
+    setTimeout(() => {
+      if (_pendingRolls[rollId]) {
+        delete _pendingRolls[rollId];
+        console.warn("Dice+ result timeout, using Math.random()");
+        resolve(Math.floor(Math.random() * diceType) + 1);
+      }
+    }, 30000);
+    try {
+      await OBR.broadcast.sendMessage("dice-plus/roll-request", {
+        rollId,
+        playerId: _myPlayerId,
+        playerName: _myPlayerName || "GM",
+        rollTarget: 'everyone',
+        diceNotation: `1d${diceType}`,
+        showResults: true,
+        timestamp: Date.now(),
+        source: DICE_PLUS_SOURCE
+      }, { destination: 'ALL' });
+    } catch(e) {
+      delete _pendingRolls[rollId];
+      console.warn("Dice+ send failed:", e);
+      resolve(Math.floor(Math.random() * diceType) + 1);
+    }
+  });
+}
 
 // ── App state ──────────────────────────────────────────────────────
 const ID       = "com.kingmaker.war";
@@ -346,6 +369,8 @@ OBR.onReady(async () => {
   const role = await OBR.player.getRole();
   isGM = role==='GM';
   _myPlayerId = await OBR.player.getId();
+  _myPlayerName = await OBR.player.getName();
+  initDicePlusListeners();
   document.getElementById('scene-status').textContent = isGM?'GM':'Player';
 
   await loadData();
