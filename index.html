@@ -859,8 +859,18 @@ function getDegree(roll,total,dc) {
   let d;
   if(total>=dc+10) d='crit-success'; else if(total>=dc) d='success';
   else if(total<=dc-10) d='crit-fail'; else d='failure';
-  if(roll===20&&d==='success') d='crit-success'; if(roll===20&&d==='failure') d='success';
-  if(roll===1&&d==='crit-success') d='success'; if(roll===1&&d==='success') d='failure';
+  // Nat 20: raise degree by one step
+  if(roll===20) {
+    if(d==='crit-fail') d='failure';
+    else if(d==='failure') d='success';
+    else if(d==='success') d='crit-success';
+  }
+  // Nat 1: lower degree by one step
+  if(roll===1) {
+    if(d==='crit-success') d='success';
+    else if(d==='success') d='failure';
+    else if(d==='failure') d='crit-fail';
+  }
   return d;
 }
 
