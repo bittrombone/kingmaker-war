@@ -267,6 +267,22 @@ async function saveData() {
 // ── Name tags ──────────────────────────────────────────────────────
 const NAME_TAG_KEY = `${ID}/nametag`;
 const HP_TAG_KEY   = `${ID}/hptag`;
+const COND_TAG_KEY = `${ID}/condtag`;
+
+// Conditions that have icons on GitHub
+const COND_ICONS = {
+  shaken:     'Shaken',
+  weary:      'Weary',
+  mired:      'Mired',
+  outflanked: 'Outflanked',
+  fortified:  'Fortified',
+  routed:     'Routed',
+  pinned:     'Pinned',
+  distant:    'Distant',
+  concealed:  'Concealed',
+  engaged:    'Engaged',
+};
+
 async function updateNameTags() {
   if (!dataLoaded) return;
   try {
@@ -275,19 +291,22 @@ async function updateNameTags() {
     const sorted = [...armies].sort((a,b)=>(b.initiative||0)-(a.initiative||0));
     const activeTurn = sorted[currentTurnIdx];
     const items = await OBR.scene.items.getItems();
-    const { buildText } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
+    const { buildText, buildImage } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
     const grid = await OBR.scene.grid.getDpi();
 
-    // Step 1: delete ALL existing kw tags in one batch (avoids stale-list bug)
+    // Step 1: delete ALL existing kw tags in one batch
     const allOldTags = items.filter(i =>
       i.metadata?.[NAME_TAG_KEY] !== undefined ||
-      i.metadata?.[HP_TAG_KEY]   !== undefined
+      i.metadata?.[HP_TAG_KEY]   !== undefined ||
+      i.metadata?.[COND_TAG_KEY] !== undefined
     );
     if (allOldTags.length > 0) await OBR.scene.items.deleteItems(allOldTags.map(t=>t.id));
 
     // Step 2: build all new tags
     const newTags = [];
     const boxW = 300;
+    const iconSize = grid * 0.45; // condition icon size
+    const iconRadius = grid * 0.72; // distance from token center
 
     for (const army of armies) {
       if (!army.tokenId) continue;
@@ -299,6 +318,7 @@ async function updateNameTags() {
       const hpPct     = army.maxHp > 0 ? army.hp / army.maxHp : 1;
       const hpColor   = hpPct > 0.5 ? '#66DD66' : hpPct > 0.25 ? '#EF9F27' : '#E24B4A';
 
+      // Name tag — above token
       newTags.push(buildText()
         .name(`kw-name-${army.tokenId}`)
         .plainText(army.name)
@@ -312,6 +332,7 @@ async function updateNameTags() {
         .build()
       );
 
+      // HP tag — below token
       newTags.push(buildText()
         .name(`kw-hp-${army.tokenId}`)
         .plainText(`${army.hp} / ${army.maxHp}`)
@@ -324,6 +345,43 @@ async function updateNameTags() {
         .metadata({ [HP_TAG_KEY]: army.tokenId })
         .build()
       );
+
+      // Condition icons — half circle on the right side of token
+      const c = army.conditions || {};
+      const activeCondKeys = Object.keys(COND_ICONS).filter(k => c[k]);
+      if (activeCondKeys.length > 0) {
+        // Spread icons across a right-side half circle (-90deg to +90deg)
+        const totalIcons = activeCondKeys.length;
+        // For 1 icon: place at 0deg (directly right)
+        // For multiple: spread evenly across -80 to +80 degrees
+        const angleRange = Math.min(160, (totalIcons - 1) * 40);
+        const startAngle = -angleRange / 2;
+
+        activeCondKeys.forEach((condKey, idx) => {
+          const angleDeg = totalIcons === 1
+            ? 0
+            : startAngle + (angleRange / (totalIcons - 1)) * idx;
+          const angleRad = (angleDeg * Math.PI) / 180;
+          const iconX = token.position.x + Math.cos(angleRad) * iconRadius - iconSize / 2;
+          const iconY = token.position.y + Math.sin(angleRad) * iconRadius - iconSize / 2;
+          const iconName = COND_ICONS[condKey];
+          const iconUrl = `${BASE_URL}/${iconName}.png`;
+
+          newTags.push(buildImage(
+            { url: iconUrl, width: 256, height: 256, mime: 'image/png' },
+            { dpi: 256, offset: { x: 0, y: 0 } }
+          )
+            .name(`kw-cond-${army.tokenId}-${condKey}`)
+            .position({ x: iconX, y: iconY })
+            .width(iconSize).height(iconSize)
+            .layer('TEXT')
+            .locked(true).visible(true)
+            .attachedTo(army.tokenId)
+            .metadata({ [COND_TAG_KEY]: army.tokenId })
+            .build()
+          );
+        });
+      }
     }
 
     // Step 3: add all new tags in one batch
@@ -334,7 +392,11 @@ async function updateNameTags() {
 async function removeNameTag(tokenId) {
   try {
     const items = await OBR.scene.items.getItems();
-    const tags = items.filter(i=>i.metadata?.[NAME_TAG_KEY]===tokenId||i.metadata?.[HP_TAG_KEY]===tokenId);
+    const tags = items.filter(i=>
+      i.metadata?.[NAME_TAG_KEY]===tokenId ||
+      i.metadata?.[HP_TAG_KEY]===tokenId ||
+      i.metadata?.[COND_TAG_KEY]===tokenId
+    );
     if (tags.length) await OBR.scene.items.deleteItems(tags.map(t=>t.id));
   } catch(e) {}
 }
