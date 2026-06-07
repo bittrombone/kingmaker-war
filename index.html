@@ -29,9 +29,15 @@
     }
     #chat-panel-header button:hover { color:#888; }
     #chat-log {
-      flex:1; overflow-y:auto; padding:5px 6px;
+      overflow-y:auto; padding:5px 6px;
       display:flex; flex-direction:column; gap:4px;
     }
+    #chat-clear-btn {
+      margin:6px 6px 0; padding:4px 10px; font-size:10px;
+      background:#1a1a18; border:0.5px solid #333;
+      border-radius:3px; color:#555; cursor:pointer; width:calc(100% - 12px);
+    }
+    #chat-clear-btn:hover { color:#888; }
     .chat-entry {
       background:#111110; border-radius:5px;
       border-left:3px solid #333; padding:6px 8px;
@@ -78,7 +84,7 @@
     <div class="tab active" onclick="showTab('battle')">Battle</div>
     <div class="tab"        onclick="showTab('armies')">Armies</div>
     <div class="tab"        onclick="showTab('forts')">Forts</div>
-
+    <div class="tab"        onclick="showTab('log')" id="log-tab-btn">Log</div>
   </div>
   <div class="content" id="content">
     <div class="empty" style="margin-top:40px">
@@ -516,7 +522,7 @@ OBR.onReady(async () => {
 // ── Tabs ───────────────────────────────────────────────────────────
 window.showTab = function(tab) {
   activeTab=tab;
-  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',['battle','armies','forts'][i]===tab));
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',['battle','armies','forts','log'][i]===tab));
   render();
 };
 
@@ -524,7 +530,8 @@ function render() {
   const c=document.getElementById('content'); if(!c) return;
   if      (activeTab==='battle') c.innerHTML=renderBattle();
   else if (activeTab==='armies') c.innerHTML=renderArmies();
-  else                           c.innerHTML=renderForts();
+  else if (activeTab==='forts')  c.innerHTML=renderForts();
+  else if (activeTab==='log')    { c.innerHTML='<button id="chat-clear-btn" onclick="clearChatLog()">Clear Log</button><div id="chat-log"></div>'; renderChatLog(); }
 }
 
 // ── Battle ─────────────────────────────────────────────────────────
@@ -891,7 +898,9 @@ function addChatEntry({ who, rollType, total, degree, detail, outcome }) {
   const time = now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
   chatEntries.unshift({ who, rollType, total, degree, detail, outcome, time });
   if (chatEntries.length > MAX_LOG) chatEntries.length = MAX_LOG;
-  renderChatLog();
+  if (activeTab==='log') renderChatLog();
+  const logBtn=document.getElementById('log-tab-btn');
+  if(logBtn&&activeTab!=='log'){logBtn.style.color='#EF9F27';setTimeout(()=>{if(logBtn)logBtn.style.color='';},2000);}
 }
 
 function renderChatLog() {
@@ -912,7 +921,7 @@ function renderChatLog() {
   }).join('');
 }
 
-window.clearChatLog = function() { chatEntries = []; renderChatLog(); };
+window.clearChatLog = function() { chatEntries = []; if(activeTab==='log') renderChatLog(); };
 
 function showResult(title,degree,detail,outcome) {
   document.querySelector('.roll-result')?.remove(); clearTimeout(resultTimeout);
