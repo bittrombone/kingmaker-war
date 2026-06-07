@@ -602,6 +602,15 @@ function renderBattle() {
           <button class="roll-btn ${aw('morale')}"   ${dis} onclick="startRoll('${activeTurn.id}','morale')">Morale (+${s.mor})</button>
           <button class="roll-btn" onclick="rollScout('${activeTurn.id}')">Scout (+${activeTurn.sct})</button>
         </div></div>
+        ${(()=>{ const potions=(activeTurn.gear?.potions||0); return potions>0?`
+        <div style="margin-top:6px;display:flex;align-items:center;gap:8px;background:#1a1a18;border-radius:5px;padding:5px 8px;border:1px solid #2d3d1a">
+          <span style="font-size:18px">🧪</span>
+          <span style="font-size:12px;color:#5DCAA5;flex:1">Healing Potions</span>
+          <span style="font-size:13px;font-weight:700;color:#5DCAA5">${potions}</span>
+          <span style="font-size:10px;color:#666">remaining</span>
+          <button class="rout-btn holds" style="padding:3px 10px;background:#1a2d1a;border-color:#5DCAA5;color:#5DCAA5" onclick="usePotion('${activeTurn.id}')">Use (Heal 1)</button>
+        </div>
+        `:''; })()}
         <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
           <label style="font-size:10px;color:#666">HP</label>
           <button class="hp-btn" onclick="changeHp('${activeTurn.id}',-1)">−</button>
@@ -722,6 +731,14 @@ window.rollAllInitiative = async () => { for(const a of armies) a.initiative=Mat
 window.rollInitiative = async (id)   => { const a=armies.find(x=>x.id===id); if(a){a.initiative=Math.floor(Math.random()*20)+1+a.sct; await saveData(); render();} };
 window.setInitiative  = async (id,v) => { const a=armies.find(x=>x.id===id); if(a){a.initiative=parseFloat(v)||0; await saveData();} };
 window.changeHp       = async (id,d) => { const a=armies.find(x=>x.id===id); if(!a) return; a.hp=Math.max(0,Math.min(a.maxHp,a.hp+d)); if(a.hp===0) OBR.notification.show(`${a.name} is Defeated!`,'WARNING'); await saveData(); render(); };
+window.usePotion      = async (id) => {
+  const a=armies.find(x=>x.id===id); if(!a) return;
+  const potions=a.gear?.potions||0; if(potions<=0) return;
+  a.gear.potions=potions-1;
+  a.hp=Math.min(a.maxHp,a.hp+1);
+  OBR.notification.show(`${a.name} uses a Healing Potion — healed to ${a.hp}/${a.maxHp} HP`,'INFO');
+  await saveData(); render();
+};
 window.toggleCondition= async (id,k) => {
   const a=armies.find(x=>x.id===id); if(!a) return;
   a.conditions=a.conditions||{}; const cond=CONDITIONS.find(c=>c.key===k);
