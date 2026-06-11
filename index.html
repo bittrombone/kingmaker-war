@@ -367,13 +367,16 @@ async function updateNameTags() {
           const iconName = COND_ICONS[condKey];
           const iconUrl = `${BASE_URL}/${iconName}.png`;
 
+          // ImageGrid.dpi=256 means the 256x256 image = 1 grid cell at scale 1.
+          // scale (iconSize/grid) shrinks it to the desired icon size.
+          const iconScale = iconSize / grid;
           newTags.push(buildImage(
             { url: iconUrl, width: 256, height: 256, mime: 'image/png' },
             { dpi: 256, offset: { x: 0, y: 0 } }
           )
             .name(`kw-cond-${army.tokenId}-${condKey}`)
             .position({ x: iconX, y: iconY })
-            .width(iconSize).height(iconSize)
+            .scale({ x: iconScale, y: iconScale })
             .layer('TEXT')
             .locked(true).visible(true)
             .attachedTo(army.tokenId)
