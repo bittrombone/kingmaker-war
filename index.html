@@ -347,48 +347,59 @@ async function updateNameTags() {
       );
 
       // Condition icons — half circle on the right side of token
-      const c = army.conditions || {};
-      const activeCondKeys = Object.keys(COND_ICONS).filter(k => c[k]);
-      if (activeCondKeys.length > 0) {
-        // Spread icons across a right-side half circle (-90deg to +90deg)
-        const totalIcons = activeCondKeys.length;
-        // For 1 icon: place at 0deg (directly right)
-        // For multiple: spread evenly across -80 to +80 degrees
-        const angleRange = Math.min(160, (totalIcons - 1) * 40);
-        const startAngle = -angleRange / 2;
-
-        activeCondKeys.forEach((condKey, idx) => {
-          const angleDeg = totalIcons === 1
-            ? 0
-            : startAngle + (angleRange / (totalIcons - 1)) * idx;
-          const angleRad = (angleDeg * Math.PI) / 180;
-          const iconX = token.position.x + Math.cos(angleRad) * iconRadius - iconSize / 2;
-          const iconY = token.position.y + Math.sin(angleRad) * iconRadius - iconSize / 2;
-          const iconName = COND_ICONS[condKey];
-          const iconUrl = `${BASE_URL}/${iconName}.png`;
-
-          // ImageGrid.dpi=256 means the 256x256 image = 1 grid cell at scale 1.
-          // scale (iconSize/grid) shrinks it to the desired icon size.
+      try {
+        const c = army.conditions || {};
+        const activeCondKeys = Object.keys(COND_ICONS).filter(k => c[k]);
+        if (activeCondKeys.length > 0) {
+          const totalIcons = activeCondKeys.length;
+          const angleRange = Math.min(160, (totalIcons - 1) * 40);
+          const startAngle = -angleRange / 2;
           const iconScale = iconSize / grid;
-          newTags.push(buildImage(
-            { url: iconUrl, width: 256, height: 256, mime: 'image/png' },
-            { dpi: 256, offset: { x: 0, y: 0 } }
-          )
-            .name(`kw-cond-${army.tokenId}-${condKey}`)
-            .position({ x: iconX, y: iconY })
-            .scale({ x: iconScale, y: iconScale })
-            .layer('TEXT')
-            .locked(true).visible(true)
-            .attachedTo(army.tokenId)
-            .metadata({ [COND_TAG_KEY]: army.tokenId })
-            .build()
-          );
-        });
+
+          activeCondKeys.forEach((condKey, idx) => {
+            const angleDeg = totalIcons === 1
+              ? 0
+              : startAngle + (angleRange / (totalIcons - 1)) * idx;
+            const angleRad = (angleDeg * Math.PI) / 180;
+            const iconX = token.position.x + Math.cos(angleRad) * iconRadius - iconSize / 2;
+            const iconY = token.position.y + Math.sin(angleRad) * iconRadius - iconSize / 2;
+            const iconName = COND_ICONS[condKey];
+            const iconUrl = `${BASE_URL}/${iconName}.png`;
+
+            newTags.push(buildImage(
+              { url: iconUrl, width: 256, height: 256, mime: 'image/png' },
+              { dpi: 256, offset: { x: 0, y: 0 } }
+            )
+              .name(`kw-cond-${army.tokenId}-${condKey}`)
+              .position({ x: iconX, y: iconY })
+              .scale({ x: iconScale, y: iconScale })
+              .layer('ATTACHMENT')
+              .locked(true).visible(true)
+              .attachedTo(army.tokenId)
+              .metadata({ [COND_TAG_KEY]: army.tokenId })
+              .build()
+            );
+          });
+        }
+      } catch(iconErr) {
+        console.warn('condition icon build failed', iconErr);
       }
     }
 
-    // Step 3: add all new tags in one batch
-    if (newTags.length > 0) await OBR.scene.items.addItems(newTags);
+    // Step 3: add all new tags in one batch.
+    // If the batch fails (e.g. an image item is rejected), retry with
+    // only name/HP tags so those don\'t silently disappear.
+    if (newTags.length > 0) {
+      try {
+        await OBR.scene.items.addItems(newTags);
+      } catch(addErr) {
+        console.warn('addItems batch failed, retrying without condition icons', addErr);
+        const safeTags = newTags.filter(t => t.type !== 'IMAGE');
+        if (safeTags.length > 0) {
+          try { await OBR.scene.items.addItems(safeTags); } catch(e2) { console.warn('fallback addItems also failed', e2); }
+        }
+      }
+    }
 
   } catch(e) { console.warn('updateNameTags', e); }
 }
