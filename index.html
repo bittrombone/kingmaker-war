@@ -269,18 +269,18 @@ const NAME_TAG_KEY = `${ID}/nametag`;
 const HP_TAG_KEY   = `${ID}/hptag`;
 const COND_TAG_KEY = `${ID}/condtag`;
 
-// Short labels / emoji shown for each active condition
+// Short labels shown for each active condition (no emoji — plain text only)
 const COND_LABELS = {
-  shaken:     { emoji: '😰', label: 'Shaken' },
-  weary:      { emoji: '😓', label: 'Weary' },
-  mired:      { emoji: '👢', label: 'Mired' },
-  outflanked: { emoji: '⚔️', label: 'Outflanked' },
-  fortified:  { emoji: '🛡️', label: 'Fortified' },
-  routed:     { emoji: '🏳️', label: 'Routed' },
-  pinned:     { emoji: '📍', label: 'Pinned' },
-  distant:    { emoji: '🏹', label: 'Distant' },
-  concealed:  { emoji: '🌫️', label: 'Concealed' },
-  engaged:    { emoji: '🤺', label: 'Engaged' },
+  shaken:     { label: 'Shaken' },
+  weary:      { label: 'Weary' },
+  mired:      { label: 'Mired' },
+  outflanked: { label: 'Outflanked' },
+  fortified:  { label: 'Fortified' },
+  routed:     { label: 'Routed' },
+  pinned:     { label: 'Pinned' },
+  distant:    { label: 'Distant' },
+  concealed:  { label: 'Concealed' },
+  engaged:    { label: 'Engaged' },
 };
 
 async function updateNameTags() {
@@ -344,34 +344,50 @@ async function updateNameTags() {
         .build()
       );
 
-      // Condition tag — text row of emoji/labels below the HP tag
-      const c = army.conditions || {};
-      const activeCondKeys = Object.keys(COND_LABELS).filter(k => c[k]);
-      if (activeCondKeys.length > 0) {
-        const condText = activeCondKeys.map(k => {
-          const info = COND_LABELS[k];
-          const cond = CONDITIONS.find(cc=>cc.key===k);
-          const val = cond?.hasValue && c[k] > 0 ? ` ${c[k]}` : '';
-          return `${info.emoji} ${info.label}${val}`;
-        }).join('   ');
+      // Condition tag — text row of labels below the HP tag
+      try {
+        const c = army.conditions || {};
+        const activeCondKeys = Object.keys(COND_LABELS).filter(k => c[k]);
+        if (activeCondKeys.length > 0) {
+          const condText = activeCondKeys.map(k => {
+            const info = COND_LABELS[k];
+            const cond = CONDITIONS.find(cc=>cc.key===k);
+            const val = cond && cond.hasValue && c[k] > 0 ? (' ' + c[k]) : '';
+            return info.label + val;
+          }).join('  |  ');
 
-        newTags.push(buildText()
-          .name(`kw-cond-${army.tokenId}`)
-          .plainText(condText)
-          .position({ x: token.position.x - boxW / 2, y: token.position.y + grid * 1.05 })
-          .layer('TEXT').locked(true).visible(true).textType('PLAIN')
-          .width(boxW)
-          .fontSize(14).fontWeight(700).textAlign('CENTER')
-          .fillColor('#FFD27F').strokeColor('#111110').strokeWidth(3)
-          .attachedTo(army.tokenId)
-          .metadata({ [COND_TAG_KEY]: army.tokenId })
-          .build()
-        );
+          newTags.push(buildText()
+            .name(`kw-cond-${army.tokenId}`)
+            .plainText(condText)
+            .position({ x: token.position.x - boxW / 2, y: token.position.y + grid * 1.05 })
+            .layer('TEXT').locked(true).visible(true).textType('PLAIN')
+            .width(boxW)
+            .fontSize(14).fontWeight(700).textAlign('CENTER')
+            .fillColor('#FFD27F').strokeColor('#111110').strokeWidth(3)
+            .attachedTo(army.tokenId)
+            .metadata({ [COND_TAG_KEY]: army.tokenId })
+            .build()
+          );
+        }
+      } catch(condErr) {
+        console.warn('condition tag build failed', condErr);
       }
     }
 
-    // Step 3: add all new tags in one batch
-    if (newTags.length > 0) await OBR.scene.items.addItems(newTags);
+    // Step 3: add all new tags in one batch.
+    // If the batch fails for any reason, retry without condition tags
+    // so name/HP tags don't silently disappear.
+    if (newTags.length > 0) {
+      try {
+        await OBR.scene.items.addItems(newTags);
+      } catch(addErr) {
+        console.warn('addItems failed, retrying without condition tags', addErr);
+        const safeTags = newTags.filter(t => !t.metadata || t.metadata[COND_TAG_KEY] === undefined);
+        if (safeTags.length > 0) {
+          try { await OBR.scene.items.addItems(safeTags); } catch(e2) { console.warn('fallback addItems also failed', e2); }
+        }
+      }
+    }
 
   } catch(e) { console.warn('updateNameTags', e); }
 }
