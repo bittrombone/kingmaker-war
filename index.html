@@ -269,18 +269,18 @@ const NAME_TAG_KEY = `${ID}/nametag`;
 const HP_TAG_KEY   = `${ID}/hptag`;
 const COND_TAG_KEY = `${ID}/condtag`;
 
-// Conditions that have icons on GitHub
-const COND_ICONS = {
-  shaken:     'Shaken',
-  weary:      'Weary',
-  mired:      'Mired',
-  outflanked: 'Outflanked',
-  fortified:  'Fortified',
-  routed:     'Routed',
-  pinned:     'Pinned',
-  distant:    'Distant',
-  concealed:  'Concealed',
-  engaged:    'Engaged',
+// Short labels / emoji shown for each active condition
+const COND_LABELS = {
+  shaken:     { emoji: '😰', label: 'Shaken' },
+  weary:      { emoji: '😓', label: 'Weary' },
+  mired:      { emoji: '👢', label: 'Mired' },
+  outflanked: { emoji: '⚔️', label: 'Outflanked' },
+  fortified:  { emoji: '🛡️', label: 'Fortified' },
+  routed:     { emoji: '🏳️', label: 'Routed' },
+  pinned:     { emoji: '📍', label: 'Pinned' },
+  distant:    { emoji: '🏹', label: 'Distant' },
+  concealed:  { emoji: '🌫️', label: 'Concealed' },
+  engaged:    { emoji: '🤺', label: 'Engaged' },
 };
 
 async function updateNameTags() {
@@ -291,7 +291,7 @@ async function updateNameTags() {
     const sorted = [...armies].sort((a,b)=>(b.initiative||0)-(a.initiative||0));
     const activeTurn = sorted[currentTurnIdx];
     const items = await OBR.scene.items.getItems();
-    const { buildText, buildImage } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
+    const { buildText } = await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
     const grid = await OBR.scene.grid.getDpi();
 
     // Step 1: delete ALL existing kw tags in one batch
@@ -305,8 +305,6 @@ async function updateNameTags() {
     // Step 2: build all new tags
     const newTags = [];
     const boxW = 300;
-    const iconSize = grid * 0.45; // condition icon size
-    const iconRadius = grid * 0.72; // distance from token center
 
     for (const army of armies) {
       if (!army.tokenId) continue;
@@ -346,60 +344,34 @@ async function updateNameTags() {
         .build()
       );
 
-      // Condition icons — half circle on the right side of token
-      try {
-        const c = army.conditions || {};
-        const activeCondKeys = Object.keys(COND_ICONS).filter(k => c[k]);
-        if (activeCondKeys.length > 0) {
-          const totalIcons = activeCondKeys.length;
-          const angleRange = Math.min(160, (totalIcons - 1) * 40);
-          const startAngle = -angleRange / 2;
-          const iconScale = iconSize / grid;
+      // Condition tag — text row of emoji/labels below the HP tag
+      const c = army.conditions || {};
+      const activeCondKeys = Object.keys(COND_LABELS).filter(k => c[k]);
+      if (activeCondKeys.length > 0) {
+        const condText = activeCondKeys.map(k => {
+          const info = COND_LABELS[k];
+          const cond = CONDITIONS.find(cc=>cc.key===k);
+          const val = cond?.hasValue && c[k] > 0 ? ` ${c[k]}` : '';
+          return `${info.emoji} ${info.label}${val}`;
+        }).join('   ');
 
-          activeCondKeys.forEach((condKey, idx) => {
-            const angleDeg = totalIcons === 1
-              ? 0
-              : startAngle + (angleRange / (totalIcons - 1)) * idx;
-            const angleRad = (angleDeg * Math.PI) / 180;
-            const iconX = token.position.x + Math.cos(angleRad) * iconRadius - iconSize / 2;
-            const iconY = token.position.y + Math.sin(angleRad) * iconRadius - iconSize / 2;
-            const iconName = COND_ICONS[condKey];
-            const iconUrl = `${BASE_URL}/${iconName}.png`;
-
-            newTags.push(buildImage(
-              { url: iconUrl, width: 256, height: 256, mime: 'image/png' },
-              { dpi: 256, offset: { x: 0, y: 0 } }
-            )
-              .name(`kw-cond-${army.tokenId}-${condKey}`)
-              .position({ x: iconX, y: iconY })
-              .scale({ x: iconScale, y: iconScale })
-              .layer('ATTACHMENT')
-              .locked(true).visible(true)
-              .attachedTo(army.tokenId)
-              .metadata({ [COND_TAG_KEY]: army.tokenId })
-              .build()
-            );
-          });
-        }
-      } catch(iconErr) {
-        console.warn('condition icon build failed', iconErr);
+        newTags.push(buildText()
+          .name(`kw-cond-${army.tokenId}`)
+          .plainText(condText)
+          .position({ x: token.position.x - boxW / 2, y: token.position.y + grid * 1.05 })
+          .layer('TEXT').locked(true).visible(true).textType('PLAIN')
+          .width(boxW)
+          .fontSize(14).fontWeight(700).textAlign('CENTER')
+          .fillColor('#FFD27F').strokeColor('#111110').strokeWidth(3)
+          .attachedTo(army.tokenId)
+          .metadata({ [COND_TAG_KEY]: army.tokenId })
+          .build()
+        );
       }
     }
 
-    // Step 3: add all new tags in one batch.
-    // If the batch fails (e.g. an image item is rejected), retry with
-    // only name/HP tags so those don\'t silently disappear.
-    if (newTags.length > 0) {
-      try {
-        await OBR.scene.items.addItems(newTags);
-      } catch(addErr) {
-        console.warn('addItems batch failed, retrying without condition icons', addErr);
-        const safeTags = newTags.filter(t => t.type !== 'IMAGE');
-        if (safeTags.length > 0) {
-          try { await OBR.scene.items.addItems(safeTags); } catch(e2) { console.warn('fallback addItems also failed', e2); }
-        }
-      }
-    }
+    // Step 3: add all new tags in one batch
+    if (newTags.length > 0) await OBR.scene.items.addItems(newTags);
 
   } catch(e) { console.warn('updateNameTags', e); }
 }
