@@ -362,7 +362,7 @@ async function updateNameTags() {
             .position({ x: token.position.x - boxW / 2, y: token.position.y + grid * 0.75 })
             .layer('TEXT').locked(true).visible(true).textType('PLAIN')
             .width(boxW)
-            .fontSize(32).fontWeight(700).textAlign('CENTER')
+            .fontSize(22).fontWeight(700).textAlign('CENTER')
             .fillColor('#FFD27F').strokeColor('#111110').strokeWidth(3)
             .attachedTo(army.tokenId)
             .metadata({ [COND_TAG_KEY]: army.tokenId })
