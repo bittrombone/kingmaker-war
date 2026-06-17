@@ -363,7 +363,7 @@ async function updateNameTags() {
             .layer('TEXT').locked(true).visible(true).textType('PLAIN')
             .width(boxW)
             .fontSize(32).fontWeight(700).textAlign('CENTER')
-            .fillColor('#FF0000').strokeColor('#111110').strokeWidth(4)
+            .fillColor('#FFD27F').strokeColor('#111110').strokeWidth(3)
             .attachedTo(army.tokenId)
             .metadata({ [COND_TAG_KEY]: army.tokenId })
             .build()
@@ -590,7 +590,7 @@ function renderBattle() {
     for (const t of armies.filter(a=>a.id!==targetingMode.armyId)) {
       html+=`<div class="rout-army"><span class="rout-army-name">${t.name} (${t.hp}/${t.maxHp} HP)</span><button class="rout-btn holds" onclick="executeRoll('${targetingMode.armyId}','${t.id}','${targetingMode.rollType}')">Target</button></div>`;
     }
-    if ((targetingMode.rollType.startsWith('ranged')||targetingMode.rollType.startsWith('attack')) && fortifications.filter(f=>f.hp>0).length>0) {
+    if ((targetingMode.rollType.startsWith('ranged')||targetingMode.rollType.startsWith('attack')) && atk?.type==='Siege' && fortifications.filter(f=>f.hp>0).length>0) {
       html+=`<div style="font-size:10px;color:#9F8FEF;margin:6px 0 3px;letter-spacing:1px">FORTIFICATIONS</div>`;
       for (const f of fortifications.filter(f=>f.hp>0)) {
         html+=`<div class="rout-army"><span class="rout-army-name" style="color:#9F8FEF">🏰 ${f.name} (HP ${f.hp}/${f.maxHp} · AC ${f.ac})</span><button class="rout-btn" style="background:#1a1535;color:#9F8FEF;border:1px solid #7F77DD" onclick="attackFort('${targetingMode.armyId}','${f.id}','${targetingMode.rollType}')">Siege</button></div>`;
