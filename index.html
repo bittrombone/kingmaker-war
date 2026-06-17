@@ -1,4 +1,4 @@
-<!-- KW v1.9 -->
+<!-- KW v2.0 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -360,7 +360,7 @@ async function updateNameTags() {
           newTags.push(buildText()
             .name(`kw-cond-${army.tokenId}`)
             .plainText(condText)
-            .position({ x: token.position.x - boxW / 2, y: token.position.y + grid * 0.75 })
+            .position({ x: token.position.x - boxW / 2, y: token.position.y + grid * 1.1 })
             .layer('TEXT').locked(true).visible(true).textType('PLAIN')
             .width(boxW)
             .fontSize(22).fontWeight(700).textAlign('CENTER')
